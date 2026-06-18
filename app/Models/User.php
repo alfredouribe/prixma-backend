@@ -47,4 +47,14 @@ class User extends Authenticatable
     {
         static::creating(fn($model) => $model->id = Str::uuid());
     }
+
+    public function profile()
+    {
+        return $this->hasOne(Profile::class);
+    }
+
+    public function settings()
+    {
+        return $this->hasOne(UserSetting::class);
+    }
 }
