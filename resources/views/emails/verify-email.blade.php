@@ -4,8 +4,30 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Verifica tu cuenta de Prixma</title>
+  <style>
+    @font-face {
+      font-family: 'Poppins';
+      src: url('{{ asset('prixma_resources/fonts/Poppins-Regular.ttf') }}') format('truetype');
+      font-weight: 400;
+    }
+    @font-face {
+      font-family: 'Poppins';
+      src: url('{{ asset('prixma_resources/fonts/Poppins-Medium.ttf') }}') format('truetype');
+      font-weight: 500;
+    }
+    @font-face {
+      font-family: 'Poppins';
+      src: url('{{ asset('prixma_resources/fonts/Poppins-SemiBold.ttf') }}') format('truetype');
+      font-weight: 600;
+    }
+    @font-face {
+      font-family: 'Poppins';
+      src: url('{{ asset('prixma_resources/fonts/Poppins-Bold.ttf') }}') format('truetype');
+      font-weight: 700;
+    }
+  </style>
 </head>
-<body style="margin: 0; padding: 0; background-color: #161622; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+<body style="margin: 0; padding: 0; background-color: #161622; font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
 
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #161622; padding: 40px 16px;">
     <tr>
@@ -18,15 +40,12 @@
               <table role="presentation" cellpadding="0" cellspacing="0" style="margin: 0 auto;">
                 <tr>
                   <td style="vertical-align: middle; padding-right: 10px;">
-                    <div style="width: 32px; height: 32px; background: #9b5dff; border-radius: 9px; text-align: center;">
-                      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" style="margin-top: 7px;">
-                        <polygon points="9,1.5 16.5,15.5 1.5,15.5" fill="none" stroke="white" stroke-width="1.8" stroke-linejoin="round"/>
-                        <line x1="9" y1="1.5" x2="9" y2="15.5" stroke="white" stroke-width="0.9" opacity="0.5"/>
-                      </svg>
-                    </div>
+                    <img src="{{ asset('prixma_resources/png/appiconColor.png') }}"
+                         width="32" height="32" alt="Prixma"
+                         style="display: block; border-radius: 9px;">
                   </td>
                   <td style="vertical-align: middle;">
-                    <span style="font-size: 20px; font-weight: 500; color: #ffffff; letter-spacing: -0.5px;">prixma</span>
+                    <span style="font-size: 20px; font-weight: 500; color: #ffffff; letter-spacing: -0.5px; font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">prixma</span>
                   </td>
                 </tr>
               </table>
@@ -37,15 +56,15 @@
           <tr>
             <td style="padding: 36px 40px 32px;">
 
-              <p style="font-size: 13px; color: #8e8ea8; margin: 0 0 20px; line-height: 1.5;">
+              <p style="font-size: 13px; color: #8e8ea8; margin: 0 0 20px; line-height: 1.5; font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
                 Hola,
               </p>
 
-              <h1 style="font-size: 22px; font-weight: 500; color: #ffffff; margin: 0 0 14px; line-height: 1.3;">
+              <h1 style="font-size: 22px; font-weight: 500; color: #ffffff; margin: 0 0 14px; line-height: 1.3; font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
                 Ya casi estás adentro. Solo falta un paso.
               </h1>
 
-              <p style="font-size: 15px; color: #8e8ea8; line-height: 1.65; margin: 0 0 28px;">
+              <p style="font-size: 15px; color: #8e8ea8; line-height: 1.65; margin: 0 0 28px; font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
                 Para activar tu cuenta y empezar a conectar siendo tú, confirma tu correo tocando el botón de abajo.
               </p>
 
@@ -54,7 +73,7 @@
                 <tr>
                   <td align="center">
                     <a href="{{ $verificationUrl }}"
-                       style="display: inline-block; background: #9b5dff; color: #ffffff; font-size: 15px; font-weight: 500; padding: 14px 36px; border-radius: 14px; text-decoration: none; letter-spacing: -0.2px;">
+                       style="display: inline-block; background: #9b5dff; color: #ffffff; font-size: 15px; font-weight: 500; padding: 14px 36px; border-radius: 14px; text-decoration: none; letter-spacing: -0.2px; font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
                       Verificar mi cuenta
                     </a>
                   </td>
@@ -64,22 +83,34 @@
               {{-- Nota de expiración --}}
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 24px;">
                 <tr>
-                  <td style="background-color: #1c1c2e; border-radius: 12px; padding: 14px 16px;">
-                    <p style="font-size: 13px; color: #8e8ea8; margin: 0; line-height: 1.5;">
-                      &#8987; Este enlace es válido durante
-                      <strong style="color: #ffffff; font-weight: 500;">7 días</strong>.
-                      Si no lo solicitaste, puedes ignorar este mensaje.
-                    </p>
+                  <td style="background-color: #161622; border-radius: 12px; padding: 14px 16px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                      <tr>
+                        <td style="vertical-align: top; padding-right: 8px; padding-top: 1px; width: 18px;">
+                          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="7" cy="7" r="5.5" stroke="#8e8ea8" stroke-width="1.2"/>
+                            <path d="M7 4.5V7L8.5 8.5" stroke="#8e8ea8" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+                          </svg>
+                        </td>
+                        <td style="vertical-align: top;">
+                          <p style="font-size: 13px; color: #8e8ea8; margin: 0; line-height: 1.5; font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+                            Este enlace es válido durante
+                            <strong style="color: #ffffff; font-weight: 500;">7 días</strong>.
+                            Si no lo solicitaste, puedes ignorar este mensaje.
+                          </p>
+                        </td>
+                      </tr>
+                    </table>
                   </td>
                 </tr>
               </table>
 
               {{-- Fallback URL --}}
-              <p style="font-size: 13px; color: #8e8ea8; line-height: 1.6; margin: 0;">
+              <p style="font-size: 13px; color: #8e8ea8; line-height: 1.6; margin: 0; font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
                 Si el botón no funciona, copia y pega este enlace en tu navegador:
               </p>
-              <p style="font-size: 12px; color: #9b5dff; word-break: break-all; margin: 6px 0 0; line-height: 1.5;">
-                {{ $verificationUrl }}
+              <p style="font-size: 12px; color: #9b5dff; word-break: break-all; margin: 6px 0 0; line-height: 1.5; font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+                {!! $verificationUrl !!}
               </p>
 
             </td>
@@ -88,7 +119,7 @@
           {{-- Footer --}}
           <tr>
             <td style="border-top: 1px solid #2a2a3a; padding: 20px 40px; text-align: center;">
-              <p style="font-size: 12px; color: #555568; margin: 0; line-height: 1.6;">
+              <p style="font-size: 12px; color: #555568; margin: 0; line-height: 1.6; font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
                 Conecta siendo tú &mdash;
                 <a href="#" style="color: #555568; text-decoration: none;">Términos de uso</a>
                 &nbsp;·&nbsp;
