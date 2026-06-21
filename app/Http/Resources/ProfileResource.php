@@ -7,17 +7,26 @@ use Illuminate\Http\Resources\Json\JsonResource;
 
 class ProfileResource extends JsonResource
 {
+    private array $statistics = [];
+
+    public function withStatistics(array $stats): static
+    {
+        $this->statistics = $stats;
+        return $this;
+    }
+
     public function toArray(Request $request): array
     {
         return [
             'id'                     => $this->id,
             'display_name'           => $this->display_name,
+            'bio'                    => $this->bio,
+            'city'                   => $this->city,
+            'intention'              => $this->intention,
             'custom_gender_identity' => $this->custom_gender_identity,
             'custom_orientation'     => $this->custom_orientation,
             'custom_pronouns'        => $this->custom_pronouns,
             'custom_interests'       => $this->custom_interests,
-            'intention'              => $this->intention,
-            'bio'                    => $this->bio,
             'photo_url'              => $this->photo_url,
             'video_url'              => $this->when($this->video_processed, $this->video_url),
             'video_processed'        => $this->video_processed,
@@ -35,6 +44,10 @@ class ProfileResource extends JsonResource
             'interests'              => $this->whenLoaded('interests', fn() =>
                 $this->interests->map(fn($i) => ['id' => $i->id, 'slug' => $i->slug, 'label' => $i->label, 'category' => $i->category])
             ),
+            'photos'                 => $this->whenLoaded('photos', fn() =>
+                ProfilePhotoResource::collection($this->photos)
+            ),
+            'statistics'             => $this->when(!empty($this->statistics), $this->statistics),
         ];
     }
 }

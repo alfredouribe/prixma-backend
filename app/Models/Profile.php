@@ -19,6 +19,7 @@ class Profile extends Model
         'custom_interests',
         'intention',
         'bio',
+        'city',
         'video_url',
         'video_processed',
         'photo_url',
@@ -63,5 +64,10 @@ class Profile extends Model
     public function interests()
     {
         return $this->belongsToMany(Interest::class, 'profile_interests', 'profile_id', 'interest_id');
+    }
+
+    public function photos()
+    {
+        return $this->hasMany(ProfilePhoto::class)->orderBy('position');
     }
 }

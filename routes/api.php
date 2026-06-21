@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\Auth\AuthController;
 use App\Http\Controllers\Api\Onboarding\OnboardingController;
+use App\Http\Controllers\Api\Profile\ProfileController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', fn () => response()->json(['status' => 'ok']));
@@ -27,5 +28,19 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/step/video', [OnboardingController::class, 'stepVideo']);
         Route::post('/step/safety', [OnboardingController::class, 'stepSafety']);
         Route::post('/video/presigned-url', [OnboardingController::class, 'videoPresignedUrl']);
+    });
+
+    Route::prefix('profiles')->group(function () {
+        Route::get('/me', [ProfileController::class, 'me']);
+        Route::put('/me', [ProfileController::class, 'update']);
+        Route::get('/{uuid}', [ProfileController::class, 'show']);
+
+        Route::post('/me/photos', [ProfileController::class, 'storePhoto']);
+        Route::delete('/me/photos/{uuid}', [ProfileController::class, 'destroyPhoto']);
+        Route::patch('/me/photos/reorder', [ProfileController::class, 'reorderPhotos']);
+
+        Route::post('/me/video/presigned-url', [ProfileController::class, 'videoPresignedUrl']);
+        Route::post('/me/video', [ProfileController::class, 'storeVideo']);
+        Route::delete('/me/video', [ProfileController::class, 'destroyVideo']);
     });
 });
