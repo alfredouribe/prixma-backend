@@ -26,7 +26,7 @@ class AuthService
 
         $token = $user->createToken('mobile')->plainTextToken;
 
-        Mail::to($user->email)->send(new VerifyEmailMail($user));
+        Mail::to($user->email)->queue(new VerifyEmailMail($user));
 
         return ['user' => $user, 'token' => $token];
     }

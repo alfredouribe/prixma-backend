@@ -14,16 +14,7 @@ class VerifyEmailMail extends Mailable
 {
     use Queueable, SerializesModels;
 
-    public string $verificationUrl;
-
-    public function __construct(public User $user)
-    {
-        $this->verificationUrl = URL::temporarySignedRoute(
-            'email.verify',
-            now()->addDays(7),
-            ['id' => $user->id, 'hash' => sha1($user->email)]
-        );
-    }
+    public function __construct(public User $user) {}
 
     public function envelope(): Envelope
     {
@@ -36,6 +27,13 @@ class VerifyEmailMail extends Mailable
     {
         return new Content(
             view: 'emails.verify-email',
+            with: [
+                'verificationUrl' => URL::temporarySignedRoute(
+                    'email.verify',
+                    now()->addDays(7),
+                    ['id' => $this->user->id, 'hash' => sha1($this->user->email)]
+                ),
+            ]
         );
     }
 }
