@@ -66,4 +66,12 @@ class AuthController extends Controller
 
         return response()->json(['message' => 'Contraseña actualizada correctamente.']);
     }
+
+    public function verifyEmail(string $id, string $hash): \Illuminate\Http\Response
+    {
+        $this->authService->verifyEmail($id, $hash);
+
+        return response(view('emails.verified')->render(), 200)
+            ->header('Content-Type', 'text/html');
+    }
 }

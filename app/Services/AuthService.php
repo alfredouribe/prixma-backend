@@ -5,8 +5,10 @@ namespace App\Services;
 use App\Exceptions\AuthorizationException;
 use App\Exceptions\BusinessException;
 use App\Exceptions\UnauthorizedException;
+use App\Mail\VerifyEmailMail;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Password;
 
 class AuthService
@@ -24,7 +26,25 @@ class AuthService
 
         $token = $user->createToken('mobile')->plainTextToken;
 
+        Mail::to($user->email)->send(new VerifyEmailMail($user));
+
         return ['user' => $user, 'token' => $token];
+    }
+
+    public function verifyEmail(string $id, string $hash): void
+    {
+        $user = User::findOrFail($id);
+
+        abort_unless(
+            hash_equals(sha1($user->email), $hash),
+            403,
+            'Enlace de verificación inválido.'
+        );
+
+        if (! $user->email_verified_at) {
+            $user->email_verified_at = now();
+            $user->save();
+        }
     }
 
     public function login(array $data): array
