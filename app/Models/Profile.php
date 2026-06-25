@@ -21,6 +21,7 @@ class Profile extends Model
         'bio',
         'city',
         'video_url',
+        'video_thumbnail_url',
         'video_processed',
         'photo_url',
         'onboarding_step',

@@ -9,6 +9,7 @@ use App\Http\Requests\Onboarding\StepIntentionRequest;
 use App\Http\Requests\Onboarding\StepPronounsRequest;
 use App\Http\Requests\Onboarding\StepSafetyRequest;
 use App\Http\Requests\Onboarding\StepVideoRequest;
+use App\Http\Requests\Onboarding\UploadVideoRequest;
 use App\Http\Resources\OnboardingStatusResource;
 use App\Http\Resources\ProfileResource;
 use App\Models\GenderIdentity;
@@ -130,6 +131,18 @@ class OnboardingController extends Controller
         return response()->json([
             'message' => '¡Onboarding completado! Bienvenide a Prixma.',
         ]);
+    }
+
+    public function uploadVideo(UploadVideoRequest $request): JsonResponse
+    {
+        $this->onboardingService->uploadRawVideo(
+            $request->user(),
+            $request->file('video')
+        );
+
+        return response()->json([
+            'message' => 'Video recibido. Está siendo procesado.',
+        ], 202);
     }
 
     public function videoPresignedUrl(Request $request): JsonResponse

@@ -193,16 +193,22 @@ class ProfileService
         ];
     }
 
-    public function saveVideo(User $user, string $videoKey): void
+    public function saveVideo(User $user, \Illuminate\Http\UploadedFile $file): void
     {
         $profile = $user->profile ?? abort(404);
 
-        if ($profile->video_url && $profile->video_url !== $videoKey) {
+        if ($profile->video_url) {
             Storage::disk('s3')->delete($profile->video_url);
         }
 
-        $profile->video_url       = $videoKey;
-        $profile->video_processed = false;
+        $ext = strtolower($file->getClientOriginalExtension()) ?: 'bin';
+        $key = 'videos/raw/' . $user->id . '/' . Str::uuid() . '.' . $ext;
+
+        Storage::disk('s3')->put($key, file_get_contents($file->getRealPath()), 'private');
+
+        $profile->video_url           = $key;
+        $profile->video_thumbnail_url = null;
+        $profile->video_processed     = false;
         $profile->save();
 
         ProcessProfileVideo::dispatch($profile);

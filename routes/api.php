@@ -27,6 +27,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/step/interests', [OnboardingController::class, 'stepInterests']);
         Route::post('/step/video', [OnboardingController::class, 'stepVideo']);
         Route::post('/step/safety', [OnboardingController::class, 'stepSafety']);
+        Route::post('/video/upload', [OnboardingController::class, 'uploadVideo']);
         Route::post('/video/presigned-url', [OnboardingController::class, 'videoPresignedUrl']);
     });
 

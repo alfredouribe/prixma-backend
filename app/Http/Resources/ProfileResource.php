@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Storage;
 
 class ProfileResource extends JsonResource
 {
@@ -28,7 +29,14 @@ class ProfileResource extends JsonResource
             'custom_pronouns'        => $this->custom_pronouns,
             'custom_interests'       => $this->custom_interests,
             'photo_url'              => $this->photo_url,
-            'video_url'              => $this->when($this->video_processed, $this->video_url),
+            'video_url'              => $this->when(
+                $this->video_processed && $this->video_url,
+                fn() => Storage::disk('s3')->temporaryUrl($this->video_url, now()->addHours(4))
+            ),
+            'video_thumbnail_url'    => $this->when(
+                $this->video_processed && $this->video_thumbnail_url,
+                fn() => Storage::disk('s3')->temporaryUrl($this->video_thumbnail_url, now()->addHours(4))
+            ),
             'video_processed'        => $this->video_processed,
             'onboarding_step'        => $this->onboarding_step,
             'onboarding_completed'   => $this->onboarding_completed,

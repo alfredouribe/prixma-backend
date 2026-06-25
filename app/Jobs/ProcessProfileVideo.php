@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Profile;
+use App\Services\VideoProcessingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -10,6 +11,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class ProcessProfileVideo implements ShouldQueue
 {
@@ -20,81 +22,80 @@ class ProcessProfileVideo implements ShouldQueue
 
     public function __construct(private readonly Profile $profile) {}
 
-    public function handle(): void
+    public function handle(VideoProcessingService $processor): void
     {
-        $videoKey = $this->profile->video_url;
+        $rawKey = $this->profile->video_url;
 
-        if (!$videoKey || !Storage::disk('s3')->exists($videoKey)) {
-            Log::warning('ProcessProfileVideo: key no encontrada en S3.', [
+        if (!$rawKey || !Storage::disk('s3')->exists($rawKey)) {
+            Log::warning('ProcessProfileVideo: archivo raw no encontrado en S3.', [
                 'profile_id' => $this->profile->id,
-                'video_key'  => $videoKey,
+                'video_key'  => $rawKey,
             ]);
             return;
         }
 
-        $tempPath = $this->downloadToTemp($videoKey);
+        $tempDir       = sys_get_temp_dir() . '/' . Str::uuid();
+        $rawPath       = null;
+        $processedPath = null;
+        $thumbPath     = null;
 
         try {
-            $this->validateFormat($videoKey);
-            $duration = $this->getVideoDuration($tempPath);
+            mkdir($tempDir, 0755, true);
+
+            $rawPath       = $tempDir . '/raw_' . basename($rawKey);
+            $processedPath = $tempDir . '/processed.mp4';
+            $thumbPath     = $tempDir . '/thumbnail.jpg';
+
+            $this->downloadToPath($rawKey, $rawPath);
+
+            $duration = $processor->getDuration($rawPath);
             $this->validateDuration($duration);
 
-            $this->profile->update(['video_processed' => true]);
-        } catch (\RuntimeException $e) {
-            Log::info('ProcessProfileVideo: video rechazado.', [
+            $processor->transcode($rawPath, $processedPath);
+            $processor->extractThumbnail($processedPath, $thumbPath);
+
+            $userId         = $this->profile->user_id;
+            $uuid           = Str::uuid();
+            $processedKey   = "videos/profiles/{$userId}/{$uuid}.mp4";
+            $thumbnailKey   = "videos/thumbnails/{$userId}/{$uuid}.jpg";
+
+            Storage::disk('s3')->put($processedKey, file_get_contents($processedPath), 'private');
+            Storage::disk('s3')->put($thumbnailKey, file_get_contents($thumbPath), 'private');
+
+            Storage::disk('s3')->delete($rawKey);
+
+            $this->profile->update([
+                'video_url'           => $processedKey,
+                'video_thumbnail_url' => $thumbnailKey,
+                'video_processed'     => true,
+            ]);
+
+        } catch (\Throwable $e) {
+            Log::error('ProcessProfileVideo: procesamiento fallido.', [
                 'profile_id' => $this->profile->id,
                 'reason'     => $e->getMessage(),
             ]);
 
-            Storage::disk('s3')->delete($videoKey);
+            if ($rawKey) {
+                Storage::disk('s3')->delete($rawKey);
+            }
 
             $this->profile->update([
-                'video_url'       => null,
-                'video_processed' => false,
+                'video_url'           => null,
+                'video_thumbnail_url' => null,
+                'video_processed'     => false,
             ]);
+
+            throw $e;
         } finally {
-            if (file_exists($tempPath)) {
-                unlink($tempPath);
-            }
+            $this->cleanupDir($tempDir);
         }
     }
 
-    private function downloadToTemp(string $key): string
+    private function downloadToPath(string $key, string $localPath): void
     {
-        $tempPath = sys_get_temp_dir() . '/' . basename($key);
         $contents = Storage::disk('s3')->get($key);
-        file_put_contents($tempPath, $contents);
-        return $tempPath;
-    }
-
-    private function validateFormat(string $key): void
-    {
-        $extension = strtolower(pathinfo($key, PATHINFO_EXTENSION));
-
-        if (!in_array($extension, ['mp4', 'mov'])) {
-            throw new \RuntimeException("Formato no permitido: {$extension}. Solo se aceptan MP4 y MOV.");
-        }
-    }
-
-    private function getVideoDuration(string $path): float
-    {
-        if (!$this->ffprobeAvailable()) {
-            // Sin ffprobe no podemos validar duración — aprobamos el video
-            return 45.0;
-        }
-
-        $output = shell_exec(
-            "ffprobe -v quiet -print_format json -show_format " . escapeshellarg($path) . " 2>/dev/null"
-        );
-
-        $data = json_decode($output ?? '', true);
-        $duration = (float) ($data['format']['duration'] ?? 0);
-
-        if ($duration === 0.0) {
-            throw new \RuntimeException('No se pudo leer la duración del video.');
-        }
-
-        return $duration;
+        file_put_contents($localPath, $contents);
     }
 
     private function validateDuration(float $duration): void
@@ -106,14 +107,24 @@ class ProcessProfileVideo implements ShouldQueue
         }
     }
 
-    private function ffprobeAvailable(): bool
+    private function cleanupDir(string $dir): void
     {
-        return !empty(shell_exec('which ffprobe 2>/dev/null'));
+        if (!is_dir($dir)) {
+            return;
+        }
+
+        foreach (glob($dir . '/*') as $file) {
+            if (is_file($file)) {
+                unlink($file);
+            }
+        }
+
+        rmdir($dir);
     }
 
     public function failed(\Throwable $exception): void
     {
-        Log::error('ProcessProfileVideo: fallo definitivo.', [
+        Log::error('ProcessProfileVideo: fallo definitivo tras todos los reintentos.', [
             'profile_id' => $this->profile->id,
             'error'      => $exception->getMessage(),
         ]);

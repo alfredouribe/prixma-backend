@@ -83,10 +83,10 @@ class ProfileController extends Controller
     public function storeVideo(Request $request): JsonResponse
     {
         $request->validate([
-            'video_key' => 'required|string|max:500',
+            'video' => 'required|file|max:204800',
         ]);
 
-        $this->profileService->saveVideo($request->user(), $request->input('video_key'));
+        $this->profileService->saveVideo($request->user(), $request->file('video'));
 
         return response()->json(['message' => 'Video recibido. Será procesado en breve.']);
     }

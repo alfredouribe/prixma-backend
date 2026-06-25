@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Storage;
 
 class PublicProfileResource extends JsonResource
 {
@@ -16,7 +17,10 @@ class PublicProfileResource extends JsonResource
             'city'          => $this->city,
             'intention'     => $this->intention,
             'photo_url'     => $this->photo_url,
-            'video_url'     => $this->when($this->video_processed, $this->video_url),
+            'video_url'     => $this->when(
+                $this->video_processed && $this->video_url,
+                fn() => Storage::disk('s3')->temporaryUrl($this->video_url, now()->addHours(4))
+            ),
             'gender_identities' => $this->whenLoaded('genderIdentities', fn() =>
                 $this->genderIdentities->map(fn($g) => ['id' => $g->id, 'slug' => $g->slug, 'label' => $g->label])
             ),

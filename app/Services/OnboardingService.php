@@ -7,6 +7,7 @@ use App\Jobs\ProcessProfileVideo;
 use App\Models\Profile;
 use App\Models\User;
 use App\Models\UserSetting;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -105,6 +106,34 @@ class OnboardingService
 
         $profile->video_url       = $data['video_key'];
         $profile->video_processed = false;
+
+        if ($profile->onboarding_step < 5) {
+            $profile->onboarding_step = 5;
+        }
+
+        $profile->save();
+
+        ProcessProfileVideo::dispatch($profile);
+
+        return $profile;
+    }
+
+    public function uploadRawVideo(User $user, UploadedFile $file): Profile
+    {
+        $profile = $this->requireProfile($user);
+
+        if ($profile->video_url) {
+            Storage::disk('s3')->delete($profile->video_url);
+        }
+
+        $ext = strtolower($file->getClientOriginalExtension()) ?: 'bin';
+        $key = 'videos/raw/' . $user->id . '/' . Str::uuid() . '.' . $ext;
+
+        Storage::disk('s3')->put($key, file_get_contents($file->getRealPath()), 'private');
+
+        $profile->video_url           = $key;
+        $profile->video_thumbnail_url = null;
+        $profile->video_processed     = false;
 
         if ($profile->onboarding_step < 5) {
             $profile->onboarding_step = 5;
