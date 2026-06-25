@@ -231,18 +231,17 @@ class ProfileService
     {
         $likesReceived = Schema::hasTable('swipes')
             ? DB::table('swipes')
-                ->where('target_profile_id', $profile->id)
-                ->where('direction', 'like')
+                ->where('swiped_id', $profile->user_id)
+                ->whereIn('direction', ['like', 'super_like'])
                 ->count()
             : 0;
 
-        $matchesCount = Schema::hasTable('matches')
-            ? DB::table('matches')
+        $matchesCount = Schema::hasTable('user_matches')
+            ? DB::table('user_matches')
                 ->where(function ($q) use ($profile) {
-                    $q->where('profile_a_id', $profile->id)
-                      ->orWhere('profile_b_id', $profile->id);
+                    $q->where('user_id_1', $profile->user_id)
+                      ->orWhere('user_id_2', $profile->user_id);
                 })
-                ->where('status', 'active')
                 ->count()
             : 0;
 

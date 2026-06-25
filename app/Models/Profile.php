@@ -26,6 +26,9 @@ class Profile extends Model
         'photo_url',
         'onboarding_step',
         'onboarding_completed',
+        'latitude',
+        'longitude',
+        'is_verified',
     ];
 
     protected function casts(): array

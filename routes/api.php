@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Auth\AuthController;
+use App\Http\Controllers\Api\Matching\MatchingController;
 use App\Http\Controllers\Api\Onboarding\OnboardingController;
 use App\Http\Controllers\Api\Profile\ProfileController;
 use Illuminate\Support\Facades\Route;
@@ -43,5 +44,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/me/video/presigned-url', [ProfileController::class, 'videoPresignedUrl']);
         Route::post('/me/video', [ProfileController::class, 'storeVideo']);
         Route::delete('/me/video', [ProfileController::class, 'destroyVideo']);
+    });
+
+    Route::prefix('matching')->group(function () {
+        Route::get('/explore', [MatchingController::class, 'explore']);
+        Route::post('/swipe', [MatchingController::class, 'swipe']);
+        Route::get('/matches', [MatchingController::class, 'matches']);
+        Route::get('/preferences', [MatchingController::class, 'getPreferences']);
+        Route::put('/preferences', [MatchingController::class, 'updatePreferences']);
     });
 });

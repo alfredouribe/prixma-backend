@@ -57,4 +57,19 @@ class User extends Authenticatable
     {
         return $this->hasOne(UserSetting::class);
     }
+
+    public function swipes()
+    {
+        return $this->hasMany(Swipe::class, 'swiper_id');
+    }
+
+    public function matchingPreferences()
+    {
+        return $this->hasOne(UserMatchingPreference::class);
+    }
+
+    public function matches()
+    {
+        return UserMatch::where('user_id_1', $this->id)->orWhere('user_id_2', $this->id);
+    }
 }
