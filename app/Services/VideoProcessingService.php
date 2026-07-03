@@ -36,15 +36,13 @@ class VideoProcessingService
 
     public function getDuration(string $videoPath): float
     {
-        $null = PHP_OS_FAMILY === 'Windows' ? '2>NUL' : '2>/dev/null';
-        $cmd  = sprintf(
-            'ffprobe -v quiet -print_format json -show_format %s %s',
-            escapeshellarg($videoPath),
-            $null
+        $cmd = sprintf(
+            'ffprobe -v quiet -print_format json -show_format %s 2>/dev/null',
+            escapeshellarg($videoPath)
         );
 
-        $output   = shell_exec($cmd);
-        $data     = json_decode($output ?? '', true);
+        $output = shell_exec($cmd);
+        $data   = json_decode($output ?? '', true);
         $duration = (float) ($data['format']['duration'] ?? 0);
 
         if ($duration === 0.0) {
@@ -56,8 +54,6 @@ class VideoProcessingService
 
     public function isAvailable(): bool
     {
-        $cmd    = PHP_OS_FAMILY === 'Windows' ? 'where ffmpeg 2>NUL' : 'which ffmpeg 2>/dev/null';
-        $output = shell_exec($cmd);
-        return !empty(trim((string) $output));
+        return !empty(shell_exec('which ffmpeg 2>/dev/null'));
     }
 }

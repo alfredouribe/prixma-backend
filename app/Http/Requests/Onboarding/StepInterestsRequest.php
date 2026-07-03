@@ -25,10 +25,8 @@ class StepInterestsRequest extends FormRequest
     {
         $validator->after(function (Validator $validator) {
             $fromCatalog = count($this->input('interest_ids', []));
-            $customRaw   = $this->input('custom_interests', '');
-            $fromCustom  = $customRaw
-                ? count(array_filter(array_map('trim', explode(',', $customRaw))))
-                : 0;
+            // custom_interests cuenta como 1 interés adicional si está relleno
+            $fromCustom = filled($this->input('custom_interests')) ? 1 : 0;
             $total = $fromCatalog + $fromCustom;
 
             if ($total < 3) {
