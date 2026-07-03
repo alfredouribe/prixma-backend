@@ -34,6 +34,14 @@ class ProcessProfileVideo implements ShouldQueue
             return;
         }
 
+        if (!$processor->isAvailable()) {
+            Log::info('ProcessProfileVideo: ffmpeg no disponible, marcando como procesado (entorno local).', [
+                'profile_id' => $this->profile->id,
+            ]);
+            $this->profile->update(['video_processed' => true]);
+            return;
+        }
+
         $tempDir       = sys_get_temp_dir() . '/' . Str::uuid();
         $rawPath       = null;
         $processedPath = null;
