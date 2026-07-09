@@ -13,6 +13,7 @@ class DatabaseSeeder extends Seeder
             OrientationSeeder::class,
             PronounSeeder::class,
             InterestSeeder::class,
+            AdminSeeder::class,
         ]);
     }
 }

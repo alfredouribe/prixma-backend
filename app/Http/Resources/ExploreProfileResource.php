@@ -21,7 +21,7 @@ class ExploreProfileResource extends JsonResource
             'orientations'     => $profile->orientations->pluck('slug'),
             'city'             => $profile->city,
             'intention'        => $profile->intention,
-            'is_verified'      => (bool) $profile->is_verified,
+            'is_verified'      => $profile->verification_status === 'verified',
             'has_video'        => $profile->video_url && $profile->video_processed,
             'interests'        => $profile->interests->pluck('slug'),
             'photos'           => $profile->photos->map(fn($p) => [

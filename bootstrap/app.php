@@ -9,6 +9,7 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -42,8 +43,15 @@ return Application::configure(basePath: dirname(__DIR__))
             return response()->json(['message' => 'Demasiados intentos. Espera un momento e intenta de nuevo.'], 429);
         });
 
-        $exceptions->render(function (AuthenticationException $_e): JsonResponse {
-            return response()->json(['message' => 'No autenticado.'], 401);
+        // Solo la API móvil (`/api/*` o requests que explícitamente esperan JSON)
+        // responde 401 en JSON. El panel `/admin` (guard `session`) debe seguir
+        // el comportamiento default de Laravel/Filament: redirigir al login.
+        $exceptions->render(function (AuthenticationException $e, Request $request): ?JsonResponse {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                return response()->json(['message' => 'No autenticado.'], 401);
+            }
+
+            return null;
         });
 
         $exceptions->render(function (ValidationException $e): JsonResponse {

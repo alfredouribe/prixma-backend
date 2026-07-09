@@ -22,7 +22,7 @@ class MatchResource extends JsonResource
                 'age'          => $otherUser->date_of_birth
                     ? Carbon::parse($otherUser->date_of_birth)->age
                     : null,
-                'is_verified'  => (bool) $otherProfile->is_verified,
+                'is_verified'  => $otherProfile->verification_status === 'verified',
                 'city'         => $otherProfile->city,
                 'intention'    => $otherProfile->intention,
                 'photo'        => $otherProfile->photos->first()?->url,

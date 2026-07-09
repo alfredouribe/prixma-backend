@@ -298,7 +298,7 @@ describe('calculateScore', function () {
         $viewerProfile = $this->profile;
         $viewerProfile->load('interests');
 
-        ['user' => $targetUser] = createUserWithProfile(['is_verified' => true, 'intention' => null]);
+        ['user' => $targetUser] = createUserWithProfile(['verification_status' => 'verified', 'intention' => null]);
         $targetProfile = $targetUser->profile()->first();
         $targetProfile->load('interests');
 

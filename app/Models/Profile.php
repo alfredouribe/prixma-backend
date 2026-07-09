@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 
 class Profile extends Model
 {
+    use HasFactory;
+
     protected $keyType = 'string';
     public $incrementing = false;
 
@@ -28,7 +31,7 @@ class Profile extends Model
         'onboarding_completed',
         'latitude',
         'longitude',
-        'is_verified',
+        'verification_status',
     ];
 
     protected function casts(): array
@@ -73,5 +76,10 @@ class Profile extends Model
     public function photos()
     {
         return $this->hasMany(ProfilePhoto::class)->orderBy('position');
+    }
+
+    public function verificationRequests()
+    {
+        return $this->hasMany(VerificationRequest::class)->orderByDesc('created_at');
     }
 }

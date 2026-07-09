@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\Auth\AuthController;
 use App\Http\Controllers\Api\Matching\MatchingController;
 use App\Http\Controllers\Api\Onboarding\OnboardingController;
 use App\Http\Controllers\Api\Profile\ProfileController;
+use App\Http\Controllers\Api\Verification\VerificationController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', fn () => response()->json(['status' => 'ok']));
@@ -44,6 +45,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/me/video/presigned-url', [ProfileController::class, 'videoPresignedUrl']);
         Route::post('/me/video', [ProfileController::class, 'storeVideo']);
         Route::delete('/me/video', [ProfileController::class, 'destroyVideo']);
+    });
+
+    Route::prefix('verification')->group(function () {
+        Route::get('/status', [VerificationController::class, 'status']);
+        Route::post('/presigned-url', [VerificationController::class, 'presignedUrl']);
+        Route::post('/', [VerificationController::class, 'submit']);
     });
 
     Route::prefix('matching')->group(function () {

@@ -54,7 +54,7 @@ class MatchingService
 
         // Verified only filter
         if ($prefs->verified_only) {
-            $query->where('profiles.is_verified', true);
+            $query->where('profiles.verification_status', 'verified');
         }
 
         // Video only filter
@@ -156,7 +156,7 @@ class MatchingService
         }
 
         // Verified profile
-        if ($target->is_verified) {
+        if ($target->verification_status === 'verified') {
             $score += 5;
         }
 
