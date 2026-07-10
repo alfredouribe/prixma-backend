@@ -67,6 +67,37 @@ describe('me', function () {
         expect($response->json('data.statistics.events_count'))->toBe(0);
     });
 
+    it('incluye verification_status con el valor por defecto unverified', function () {
+        $this->withToken($this->token)
+            ->getJson('/api/profiles/me')
+            ->assertStatus(200)
+            ->assertJsonPath('data.verification_status', 'unverified')
+            ->assertJsonStructure(['data' => ['verification_status']]);
+    });
+
+    it('refleja verification_status pending/verified/rejected en el perfil propio', function () {
+        $this->profile->update(['verification_status' => 'pending']);
+
+        $this->withToken($this->token)
+            ->getJson('/api/profiles/me')
+            ->assertStatus(200)
+            ->assertJsonPath('data.verification_status', 'pending');
+
+        $this->profile->update(['verification_status' => 'verified']);
+
+        $this->withToken($this->token)
+            ->getJson('/api/profiles/me')
+            ->assertStatus(200)
+            ->assertJsonPath('data.verification_status', 'verified');
+
+        $this->profile->update(['verification_status' => 'rejected']);
+
+        $this->withToken($this->token)
+            ->getJson('/api/profiles/me')
+            ->assertStatus(200)
+            ->assertJsonPath('data.verification_status', 'rejected');
+    });
+
     it('requiere autenticación', function () {
         $this->getJson('/api/profiles/me')->assertStatus(401);
     });
@@ -174,6 +205,34 @@ describe('show', function () {
 
     it('requiere autenticación', function () {
         $this->getJson("/api/profiles/{$this->profile->id}")->assertStatus(401);
+    });
+
+    it('incluye is_verified en true cuando verification_status es verified', function () {
+        $otherUser    = User::factory()->withCompletedOnboarding()->create();
+        $otherProfile = Profile::create([
+            'user_id'              => $otherUser->id,
+            'display_name'         => 'Roberto',
+            'verification_status'  => 'verified',
+        ]);
+
+        $this->withToken($this->token)
+            ->getJson("/api/profiles/{$otherProfile->id}")
+            ->assertStatus(200)
+            ->assertJsonPath('data.is_verified', true);
+    });
+
+    it('incluye is_verified en false cuando verification_status no es verified', function () {
+        $otherUser    = User::factory()->withCompletedOnboarding()->create();
+        $otherProfile = Profile::create([
+            'user_id'              => $otherUser->id,
+            'display_name'         => 'Roberto',
+            'verification_status'  => 'pending',
+        ]);
+
+        $this->withToken($this->token)
+            ->getJson("/api/profiles/{$otherProfile->id}")
+            ->assertStatus(200)
+            ->assertJsonPath('data.is_verified', false);
     });
 
 });

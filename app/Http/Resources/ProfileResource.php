@@ -24,6 +24,7 @@ class ProfileResource extends JsonResource
             'bio'                    => $this->bio,
             'city'                   => $this->city,
             'intention'              => $this->intention,
+            'verification_status'    => $this->verification_status,
             'custom_gender_identity' => $this->custom_gender_identity,
             'custom_orientation'     => $this->custom_orientation,
             'custom_pronouns'        => $this->custom_pronouns,

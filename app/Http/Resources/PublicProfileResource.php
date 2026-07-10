@@ -16,6 +16,7 @@ class PublicProfileResource extends JsonResource
             'bio'           => $this->bio,
             'city'          => $this->city,
             'intention'     => $this->intention,
+            'is_verified'   => $this->verification_status === 'verified',
             'photo_url'     => $this->photo_url,
             'video_url'     => $this->when(
                 $this->video_processed && $this->video_url,
