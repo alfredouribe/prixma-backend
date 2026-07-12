@@ -15,10 +15,10 @@ class VerificationRequestFactory extends Factory
     public function definition(): array
     {
         return [
-            'profile_id'      => Profile::factory(),
-            'document_s3_key' => 'verification/' . Str::uuid() . '/document.jpg',
-            'selfie_s3_key'   => null,
-            'status'          => 'pending',
+            'profile_id'    => Profile::factory(),
+            'document_path' => 'verification/' . Str::uuid() . '/document.jpg',
+            'selfie_path'   => null,
+            'status'        => 'pending',
         ];
     }
 

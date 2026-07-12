@@ -7,11 +7,13 @@ use App\Jobs\ProcessProfileVideo;
 use App\Models\Profile;
 use App\Models\ProfilePhoto;
 use App\Models\User;
+use App\Models\UserSetting;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Symfony\Component\Process\Process;
 
 class ProfileService
 {
@@ -88,7 +90,7 @@ class ProfileService
 
         $key = 'photos/profiles/' . $user->id . '/' . Str::uuid() . '.jpg';
 
-        Storage::disk('s3')->put($key, file_get_contents($file->getRealPath()));
+        $this->compressAndUploadToS3($file, $key);
 
         $url = Storage::disk('s3')->url($key);
 
@@ -152,47 +154,6 @@ class ProfileService
         });
     }
 
-    public function generatePhotoPresignedUrl(User $user): array
-    {
-        $key = 'photos/profiles/' . $user->id . '/' . Str::uuid() . '.jpg';
-
-        $s3Client = Storage::disk('s3')->getClient();
-
-        $command = $s3Client->getCommand('PutObject', [
-            'Bucket'      => config('filesystems.disks.s3.bucket'),
-            'Key'         => $key,
-            'ContentType' => 'image/jpeg',
-        ]);
-
-        $presignedRequest = $s3Client->createPresignedRequest($command, '+15 minutes');
-
-        return [
-            'upload_url' => (string) $presignedRequest->getUri(),
-            'photo_key'  => $key,
-        ];
-    }
-
-    public function generateVideoPresignedUrl(User $user): array
-    {
-        $key = 'videos/profiles/' . $user->id . '/' . Str::uuid() . '.mp4';
-
-        $s3Client = Storage::disk('s3')->getClient();
-
-        $command = $s3Client->getCommand('PutObject', [
-            'Bucket'      => config('filesystems.disks.s3.bucket'),
-            'Key'         => $key,
-            'ContentType' => 'video/mp4',
-            'ACL'         => 'private',
-        ]);
-
-        $presignedRequest = $s3Client->createPresignedRequest($command, '+15 minutes');
-
-        return [
-            'upload_url' => (string) $presignedRequest->getUri(),
-            'video_key'  => $key,
-        ];
-    }
-
     public function saveVideo(User $user, \Illuminate\Http\UploadedFile $file): void
     {
         $profile = $user->profile ?? abort(404);
@@ -225,6 +186,77 @@ class ProfileService
         $profile->video_url       = null;
         $profile->video_processed = false;
         $profile->save();
+    }
+
+    /**
+     * Devuelve la configuración de privacidad/seguridad del usuario
+     * (los mismos 4 toggles que se capturan en el paso "Safety" de
+     * Onboarding). Cuentas creadas antes de que existiera esta tabla
+     * (o cualquier caso borde donde el registro no se haya creado)
+     * no deben recibir un 404 — se crea la fila con los defaults de la
+     * migración (`selfie_verification_enabled: true`, `incognito_mode_enabled:
+     * false`, `geo_block_enabled: false`, `reports_enabled: true`) vía
+     * `firstOrCreate`, dejando que la base de datos aplique esos defaults
+     * en vez de hardcodearlos aquí también.
+     */
+    public function getSettings(User $user): UserSetting
+    {
+        $settings = UserSetting::firstOrCreate(['user_id' => $user->id]);
+
+        // `firstOrCreate` inserta solo `user_id` cuando la fila no existía,
+        // dejando que MySQL aplique los defaults de columna en el INSERT.
+        // La instancia en memoria, sin embargo, no refleja esos defaults
+        // (los atributos nunca se asignaron en PHP) hasta recargarla.
+        if ($settings->wasRecentlyCreated) {
+            $settings = $settings->fresh();
+        }
+
+        return $settings;
+    }
+
+    public function updateSettings(User $user, array $data): UserSetting
+    {
+        $settings = UserSetting::firstOrCreate(['user_id' => $user->id]);
+        $settings->fill($data);
+        $settings->save();
+
+        return $settings->fresh();
+    }
+
+    /**
+     * Comprime una foto de perfil con ffmpeg (reduce calidad/tamaño) y sube
+     * el resultado a S3 bajo la key dada. A diferencia del documento de
+     * Verification, las fotos de perfil sí son de larga duración y públicas
+     * — por eso el destino final es `Storage::disk('s3')` y no el disco
+     * `local` (ver constitution.md → "Media Upload Pipeline"; la excepción
+     * de guardar en disco local aplica solo a Verification). El archivo
+     * temporal se borra siempre, incluso si la compresión falla.
+     */
+    private function compressAndUploadToS3(UploadedFile $file, string $key): void
+    {
+        $outputPath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'profile_photo_' . Str::uuid() . '.jpg';
+
+        try {
+            $process = new Process([
+                'ffmpeg',
+                '-y',
+                '-i', $file->getRealPath(),
+                '-vf', "scale='min(1080,iw)':-2",
+                '-q:v', '5',
+                $outputPath,
+            ]);
+            $process->run();
+
+            if (!$process->isSuccessful() || !file_exists($outputPath) || filesize($outputPath) === 0) {
+                throw new BusinessException('No pudimos procesar tu foto. Verifica que la imagen no esté dañada e intenta de nuevo.');
+            }
+
+            Storage::disk('s3')->put($key, file_get_contents($outputPath));
+        } finally {
+            if (file_exists($outputPath)) {
+                unlink($outputPath);
+            }
+        }
     }
 
     private function calculateStatistics(Profile $profile): array

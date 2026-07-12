@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api\Verification;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Verification\SubmitVerificationRequest;
-use App\Http\Requests\Verification\VerificationPresignedUrlRequest;
 use App\Http\Resources\VerificationStatusResource;
 use App\Services\VerificationService;
 use Illuminate\Http\JsonResponse;
@@ -14,22 +13,12 @@ class VerificationController extends Controller
 {
     public function __construct(private readonly VerificationService $verificationService) {}
 
-    public function presignedUrl(VerificationPresignedUrlRequest $request): JsonResponse
-    {
-        $result = $this->verificationService->generatePresignedUrl(
-            $request->user(),
-            $request->validated('type', 'document'),
-        );
-
-        return response()->json(['data' => $result]);
-    }
-
     public function submit(SubmitVerificationRequest $request): JsonResponse
     {
         $verificationRequest = $this->verificationService->submit(
             $request->user(),
-            $request->validated('document_s3_key'),
-            $request->validated('selfie_s3_key'),
+            $request->file('document'),
+            $request->file('selfie'),
         );
 
         return response()->json([

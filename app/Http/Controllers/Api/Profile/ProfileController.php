@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api\Profile;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Profile\UpdateProfileRequest;
+use App\Http\Requests\Profile\UpdateSettingsRequest;
 use App\Http\Requests\Profile\UploadPhotoRequest;
 use App\Http\Resources\ProfilePhotoResource;
 use App\Http\Resources\ProfileResource;
 use App\Http\Resources\PublicProfileResource;
+use App\Http\Resources\UserSettingResource;
 use App\Services\ProfileService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -32,6 +34,25 @@ class ProfileController extends Controller
         return response()->json([
             'data'    => new ProfileResource($profile),
             'message' => 'Perfil actualizado.',
+        ]);
+    }
+
+    public function settings(Request $request): JsonResponse
+    {
+        $settings = $this->profileService->getSettings($request->user());
+
+        return response()->json([
+            'data' => new UserSettingResource($settings),
+        ]);
+    }
+
+    public function updateSettings(UpdateSettingsRequest $request): JsonResponse
+    {
+        $settings = $this->profileService->updateSettings($request->user(), $request->validated());
+
+        return response()->json([
+            'data'    => new UserSettingResource($settings),
+            'message' => 'Configuración actualizada.',
         ]);
     }
 
@@ -71,13 +92,6 @@ class ProfileController extends Controller
         $this->profileService->reorderPhotos($request->user(), $request->input('ordered_ids'));
 
         return response()->json(['message' => 'Orden actualizado.']);
-    }
-
-    public function videoPresignedUrl(Request $request): JsonResponse
-    {
-        $result = $this->profileService->generateVideoPresignedUrl($request->user());
-
-        return response()->json(['data' => $result]);
     }
 
     public function storeVideo(Request $request): JsonResponse

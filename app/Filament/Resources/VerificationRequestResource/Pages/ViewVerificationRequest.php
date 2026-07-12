@@ -21,10 +21,13 @@ class ViewVerificationRequest extends ViewRecord
     protected static string $resource = VerificationRequestResource::class;
 
     /**
-     * Duración de las URLs firmadas para ver el documento/selfie. Nunca se
-     * cachean — se generan cada vez que se abre el detalle.
+     * Texto mostrado cuando el archivo ya no existe en el disco local — la
+     * solicitud ya fue aprobada/rechazada y VerificationService borró el
+     * documento/selfie (son de vida corta, ver constitution.md → "Media
+     * Upload Pipeline"). No es copy de marca: el panel admin es tooling
+     * interno de staff, brand/copies.md no aplica aquí.
      */
-    private const SIGNED_URL_TTL_MINUTES = 5;
+    private const FILE_MISSING_TEXT = 'Documento ya no disponible — la solicitud ya fue revisada y el archivo se eliminó.';
 
     public function infolist(Infolist $infolist): Infolist
     {
@@ -54,21 +57,38 @@ class ViewVerificationRequest extends ViewRecord
                     ]),
 
                 Section::make('Documento de identidad')
-                    ->description('URLs firmadas de corta duración — no se cachean.')
+                    ->description('Servido en streaming desde el disco privado del servidor — nunca S3, nunca URL pública. El archivo se elimina en cuanto la solicitud se resuelve.')
                     ->columns(2)
                     ->schema([
-                        ImageEntry::make('document_s3_key')
+                        ImageEntry::make('document_path')
                             ->label('INE (frente)')
-                            ->getStateUsing(fn (VerificationRequest $record): string => Storage::disk('s3_identity')
-                                ->temporaryUrl($record->document_s3_key, now()->addMinutes(self::SIGNED_URL_TTL_MINUTES)))
+                            ->getStateUsing(fn (VerificationRequest $record): string => route(
+                                'filament.admin.resources.verification-requests.document',
+                                $record,
+                            ))
+                            ->visible(fn (VerificationRequest $record): bool => Storage::disk('local')->exists($record->document_path))
                             ->height(300),
-                        ImageEntry::make('selfie_s3_key')
+                        TextEntry::make('document_path_missing')
+                            ->label('INE (frente)')
+                            ->state(self::FILE_MISSING_TEXT)
+                            ->color('gray')
+                            ->visible(fn (VerificationRequest $record): bool => ! Storage::disk('local')->exists($record->document_path)),
+
+                        ImageEntry::make('selfie_path')
                             ->label('Selfie de comparación')
-                            ->getStateUsing(fn (VerificationRequest $record): ?string => filled($record->selfie_s3_key)
-                                ? Storage::disk('s3_identity')->temporaryUrl($record->selfie_s3_key, now()->addMinutes(self::SIGNED_URL_TTL_MINUTES))
-                                : null)
-                            ->visible(fn (VerificationRequest $record): bool => filled($record->selfie_s3_key))
+                            ->getStateUsing(fn (VerificationRequest $record): string => route(
+                                'filament.admin.resources.verification-requests.selfie',
+                                $record,
+                            ))
+                            ->visible(fn (VerificationRequest $record): bool => filled($record->selfie_path)
+                                && Storage::disk('local')->exists($record->selfie_path))
                             ->height(300),
+                        TextEntry::make('selfie_path_missing')
+                            ->label('Selfie de comparación')
+                            ->state(self::FILE_MISSING_TEXT)
+                            ->color('gray')
+                            ->visible(fn (VerificationRequest $record): bool => filled($record->selfie_path)
+                                && ! Storage::disk('local')->exists($record->selfie_path)),
                     ]),
 
                 Section::make('Fotos de perfil (para comparar)')

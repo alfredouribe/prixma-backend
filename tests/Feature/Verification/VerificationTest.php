@@ -5,6 +5,7 @@ use App\Models\Profile;
 use App\Models\User;
 use App\Models\VerificationRequest;
 use App\Services\VerificationService;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
@@ -22,7 +23,7 @@ function createAdmin(array $attributes = []): Admin
 }
 
 beforeEach(function () {
-    Storage::fake('s3_identity');
+    Storage::fake('local');
 
     $this->user  = User::factory()->withCompletedOnboarding()->create();
     $this->token = $this->user->createToken('mobile')->plainTextToken;
@@ -38,24 +39,17 @@ beforeEach(function () {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/verification/presigned-url
-// ---------------------------------------------------------------------------
-
-describe('presignedUrl', function () {
-
-    it('requiere autenticación', function () {
-        $this->postJson('/api/verification/presigned-url')->assertStatus(401);
-    });
-
-    // Requiere AWS SDK instalado + credenciales reales para computar la firma
-    // contra un endpoint real. Se cubre con test de integración cuando el
-    // entorno esté configurado (mismo criterio que Onboarding/Profile).
-    it('retorna upload_url y key')->todo();
-
-});
-
-// ---------------------------------------------------------------------------
 // POST /api/verification
+// ---------------------------------------------------------------------------
+//
+// El endpoint recibe el archivo como multipart/form-data. El backend lo
+// comprime con ffmpeg y lo guarda en el disco `local` privado del backend —
+// nunca se genera una pre-signed URL de subida (ver constitution.md →
+// "Media Upload Pipeline", excepción documentada para Verification: el
+// documento de identidad no se sube a S3, ver plan.md → "Almacenamiento del
+// documento"). El disco `local` está "fake" (Storage::fake en beforeEach),
+// pero ffmpeg corre de verdad: estos tests requieren el binario `ffmpeg`
+// disponible en el PATH del entorno donde corre `php artisan test`.
 // ---------------------------------------------------------------------------
 
 describe('submit', function () {
@@ -64,46 +58,86 @@ describe('submit', function () {
         $this->postJson('/api/verification', [])->assertStatus(401);
     });
 
-    it('document_s3_key es obligatorio', function () {
+    it('document es obligatorio', function () {
         $this->withToken($this->token)
-            ->postJson('/api/verification', [])
+            ->post('/api/verification', [], ['Accept' => 'application/json'])
             ->assertStatus(422)
-            ->assertJsonValidationErrors(['document_s3_key']);
+            ->assertJsonValidationErrors(['document']);
     });
 
     it('usuario sube documento y queda pending', function () {
         $response = $this->withToken($this->token)
-            ->postJson('/api/verification', [
-                'document_s3_key' => 'verification/' . $this->profile->id . '/doc.jpg',
-            ]);
+            ->post('/api/verification', [
+                'document' => UploadedFile::fake()->image('document.jpg', 1600, 1200),
+            ], ['Accept' => 'application/json']);
 
         $response->assertStatus(201)
             ->assertJsonPath('data.status', 'pending');
 
-        expect(VerificationRequest::where('profile_id', $this->profile->id)->count())->toBe(1);
+        $verificationRequest = VerificationRequest::where('profile_id', $this->profile->id)->sole();
+
         expect($this->profile->fresh()->verification_status)->toBe('pending');
+        expect($verificationRequest->document_path)->toStartWith('verification/' . $this->profile->id . '/');
+        expect($verificationRequest->selfie_path)->toBeNull();
+
+        // El archivo realmente se guardó, ya comprimido, en el disco local —
+        // esta es la garantía que el patrón viejo (pre-signed URL) no podía dar.
+        Storage::disk('local')->assertExists($verificationRequest->document_path);
     });
 
-    it('acepta selfie_s3_key opcional', function () {
+    it('acepta selfie opcional', function () {
         $response = $this->withToken($this->token)
-            ->postJson('/api/verification', [
-                'document_s3_key' => 'doc.jpg',
-                'selfie_s3_key'   => 'selfie.jpg',
-            ]);
+            ->post('/api/verification', [
+                'document' => UploadedFile::fake()->image('document.jpg'),
+                'selfie'   => UploadedFile::fake()->image('selfie.jpg'),
+            ], ['Accept' => 'application/json']);
 
         $response->assertStatus(201);
-        expect(VerificationRequest::first()->selfie_s3_key)->toBe('selfie.jpg');
+
+        $verificationRequest = VerificationRequest::first();
+
+        expect($verificationRequest->selfie_path)->not->toBeNull();
+        Storage::disk('local')->assertExists($verificationRequest->selfie_path);
+    });
+
+    it('rechaza un archivo que no es imagen', function () {
+        $this->withToken($this->token)
+            ->post('/api/verification', [
+                'document' => UploadedFile::fake()->create('document.pdf', 100, 'application/pdf'),
+            ], ['Accept' => 'application/json'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['document']);
+    });
+
+    it('archivo corrupto (imagen inválida) retorna 400 y no crea la solicitud', function () {
+        // mimeType forzado a image/jpeg para pasar la validación de Form
+        // Request (mimes:jpg), pero el contenido no es una imagen real —
+        // simula el caso de un archivo dañado/incompleto. ffmpeg debe fallar
+        // al decodificarlo y el service debe convertir eso en un 400 legible,
+        // nunca un 500.
+        $response = $this->withToken($this->token)
+            ->post('/api/verification', [
+                'document' => UploadedFile::fake()->create('document.jpg', 5, 'image/jpeg'),
+            ], ['Accept' => 'application/json']);
+
+        $response->assertStatus(400);
+        expect($response->json('message'))->toBeString()->not->toBeEmpty();
+
+        expect(VerificationRequest::where('profile_id', $this->profile->id)->count())->toBe(0);
+        expect($this->profile->fresh()->verification_status)->toBe('unverified');
     });
 
     it('no permite una nueva solicitud si ya hay una pendiente', function () {
         VerificationRequest::create([
             'profile_id'      => $this->profile->id,
-            'document_s3_key' => 'doc-1.jpg',
+            'document_path' => 'doc-1.jpg',
             'status'          => 'pending',
         ]);
 
         $this->withToken($this->token)
-            ->postJson('/api/verification', ['document_s3_key' => 'doc-2.jpg'])
+            ->post('/api/verification', [
+                'document' => UploadedFile::fake()->image('document.jpg'),
+            ], ['Accept' => 'application/json'])
             ->assertStatus(400);
 
         expect(VerificationRequest::where('profile_id', $this->profile->id)->count())->toBe(1);
@@ -113,7 +147,9 @@ describe('submit', function () {
         $this->profile->update(['verification_status' => 'verified']);
 
         $this->withToken($this->token)
-            ->postJson('/api/verification', ['document_s3_key' => 'doc-2.jpg'])
+            ->post('/api/verification', [
+                'document' => UploadedFile::fake()->image('document.jpg'),
+            ], ['Accept' => 'application/json'])
             ->assertStatus(400);
     });
 
@@ -121,13 +157,15 @@ describe('submit', function () {
         $admin = createAdmin();
         $first = VerificationRequest::create([
             'profile_id'      => $this->profile->id,
-            'document_s3_key' => 'doc-1.jpg',
+            'document_path' => 'doc-1.jpg',
             'status'          => 'pending',
         ]);
         app(VerificationService::class)->reject($first, $admin, 'La foto no es legible.');
 
         $response = $this->withToken($this->token)
-            ->postJson('/api/verification', ['document_s3_key' => 'doc-2.jpg']);
+            ->post('/api/verification', [
+                'document' => UploadedFile::fake()->image('document.jpg'),
+            ], ['Accept' => 'application/json']);
 
         $response->assertStatus(201);
 
@@ -159,7 +197,7 @@ describe('status', function () {
     it('retorna siempre la solicitud más reciente cuando hay varias', function () {
         VerificationRequest::create([
             'profile_id'      => $this->profile->id,
-            'document_s3_key' => 'doc-old.jpg',
+            'document_path'   => 'doc-old.jpg',
             'status'          => 'rejected',
             'rejection_reason'=> 'Foto borrosa',
             'created_at'      => now()->subDays(2),
@@ -167,7 +205,7 @@ describe('status', function () {
 
         $latest = VerificationRequest::create([
             'profile_id'      => $this->profile->id,
-            'document_s3_key' => 'doc-new.jpg',
+            'document_path'   => 'doc-new.jpg',
             'status'          => 'pending',
             'created_at'      => now(),
         ]);
@@ -182,7 +220,7 @@ describe('status', function () {
     it('muestra el motivo de rechazo cuando la solicitud vigente fue rechazada', function () {
         VerificationRequest::create([
             'profile_id'       => $this->profile->id,
-            'document_s3_key'  => 'doc.jpg',
+            'document_path'    => 'doc.jpg',
             'status'           => 'rejected',
             'rejection_reason' => 'La foto no es legible.',
         ]);
@@ -206,7 +244,7 @@ describe('VerificationService approve/reject', function () {
         $admin = createAdmin();
         $request = VerificationRequest::create([
             'profile_id'      => $this->profile->id,
-            'document_s3_key' => 'doc.jpg',
+            'document_path'   => 'doc.jpg',
             'status'          => 'pending',
         ]);
 
@@ -222,7 +260,7 @@ describe('VerificationService approve/reject', function () {
         $admin = createAdmin();
         $request = VerificationRequest::create([
             'profile_id'      => $this->profile->id,
-            'document_s3_key' => 'doc.jpg',
+            'document_path'   => 'doc.jpg',
             'status'          => 'pending',
         ]);
 
@@ -232,6 +270,29 @@ describe('VerificationService approve/reject', function () {
         expect($request->fresh()->status)->toBe('rejected');
         expect($request->fresh()->rejection_reason)->toBe('La foto no es legible.');
         expect($request->fresh()->reviewed_by)->toBe((string) $admin->id);
+    });
+
+    it('aprobar una solicitud cuyo archivo ya no existe en disco no lanza excepción', function () {
+        $admin = createAdmin();
+        $documentPath = 'verification/' . $this->profile->id . '/doc.jpg';
+
+        Storage::disk('local')->put($documentPath, 'contenido de prueba');
+
+        $request = VerificationRequest::create([
+            'profile_id'    => $this->profile->id,
+            'document_path' => $documentPath,
+            'status'        => 'pending',
+        ]);
+
+        // Simula que el archivo ya fue borrado antes (ej. doble clic de un
+        // admin aprobando la misma solicitud dos veces).
+        Storage::disk('local')->delete($documentPath);
+        expect(Storage::disk('local')->exists($documentPath))->toBeFalse();
+
+        $result = app(VerificationService::class)->approve($request, $admin);
+
+        expect($result->status)->toBe('approved');
+        expect($this->profile->fresh()->verification_status)->toBe('verified');
     });
 
 });

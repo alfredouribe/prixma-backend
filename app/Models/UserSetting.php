@@ -16,6 +16,9 @@ class UserSetting extends Model
         'incognito_mode_enabled',
         'geo_block_enabled',
         'reports_enabled',
+        'notify_matches_enabled',
+        'notify_messages_enabled',
+        'notify_events_enabled',
     ];
 
     protected function casts(): array
@@ -25,6 +28,9 @@ class UserSetting extends Model
             'incognito_mode_enabled'      => 'boolean',
             'geo_block_enabled'           => 'boolean',
             'reports_enabled'             => 'boolean',
+            'notify_matches_enabled'      => 'boolean',
+            'notify_messages_enabled'     => 'boolean',
+            'notify_events_enabled'       => 'boolean',
         ];
     }
 

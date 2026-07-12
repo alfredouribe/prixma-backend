@@ -36,20 +36,20 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('profiles')->group(function () {
         Route::get('/me', [ProfileController::class, 'me']);
         Route::put('/me', [ProfileController::class, 'update']);
+        Route::get('/me/settings', [ProfileController::class, 'settings']);
+        Route::patch('/me/settings', [ProfileController::class, 'updateSettings']);
         Route::get('/{uuid}', [ProfileController::class, 'show']);
 
         Route::post('/me/photos', [ProfileController::class, 'storePhoto']);
         Route::delete('/me/photos/{uuid}', [ProfileController::class, 'destroyPhoto']);
         Route::patch('/me/photos/reorder', [ProfileController::class, 'reorderPhotos']);
 
-        Route::post('/me/video/presigned-url', [ProfileController::class, 'videoPresignedUrl']);
         Route::post('/me/video', [ProfileController::class, 'storeVideo']);
         Route::delete('/me/video', [ProfileController::class, 'destroyVideo']);
     });
 
     Route::prefix('verification')->group(function () {
         Route::get('/status', [VerificationController::class, 'status']);
-        Route::post('/presigned-url', [VerificationController::class, 'presignedUrl']);
         Route::post('/', [VerificationController::class, 'submit']);
     });
 

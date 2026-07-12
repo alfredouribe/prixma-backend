@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Http\Controllers\Admin\VerificationDocumentController;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -16,6 +17,7 @@ use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
+use Illuminate\Support\Facades\Route;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 class AdminPanelProvider extends PanelProvider
@@ -54,6 +56,18 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 Authenticate::class,
-            ]);
+            ])
+            // Ruta autenticada por el guard `admin` del panel (misma sesión,
+            // mismo middleware de auth que las Resources) para hacer streaming
+            // del documento/selfie de verificación desde el disco local.
+            // Nunca S3, nunca URL firmada — ver constitution.md → "Media
+            // Upload Pipeline" (excepción documentada para Verification).
+            ->authenticatedRoutes(function (Panel $panel): void {
+                Route::get('/verification-requests/{verificationRequest}/document', [VerificationDocumentController::class, 'document'])
+                    ->name('resources.verification-requests.document');
+
+                Route::get('/verification-requests/{verificationRequest}/selfie', [VerificationDocumentController::class, 'selfie'])
+                    ->name('resources.verification-requests.selfie');
+            });
     }
 }

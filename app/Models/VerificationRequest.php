@@ -15,8 +15,8 @@ class VerificationRequest extends Model
 
     protected $fillable = [
         'profile_id',
-        'document_s3_key',
-        'selfie_s3_key',
+        'document_path',
+        'selfie_path',
         'status',
         'rejection_reason',
         'reviewed_by',

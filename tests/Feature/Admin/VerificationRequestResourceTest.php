@@ -3,6 +3,7 @@
 use App\Filament\Resources\VerificationRequestResource\Pages\ListVerificationRequests;
 use App\Filament\Resources\VerificationRequestResource\Pages\ViewVerificationRequest;
 use App\Models\Admin;
+use App\Models\User;
 use App\Models\VerificationRequest;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
@@ -10,7 +11,7 @@ use Livewire\Livewire;
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 
 beforeEach(function () {
-    Storage::fake('s3_identity');
+    Storage::fake('local');
     $this->admin = Admin::factory()->create(['role' => 'admin']);
 });
 
@@ -129,4 +130,61 @@ it('no se puede aprobar/rechazar una solicitud que ya fue revisada', function ()
     Livewire::test(ViewVerificationRequest::class, ['record' => $request->id])
         ->assertActionHidden('approve')
         ->assertActionHidden('reject');
+});
+
+it('la vista de detalle no rompe cuando el documento ya fue borrado del disco tras aprobar', function () {
+    $request = VerificationRequest::factory()->create(['status' => 'pending']);
+    Storage::disk('local')->put($request->document_path, 'contenido-falso');
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ViewVerificationRequest::class, ['record' => $request->id])
+        ->callAction('approve');
+
+    // VerificationService::approve() borró el archivo — confirmamos que
+    // realmente ya no está antes de volver a abrir el detalle.
+    expect(Storage::disk('local')->exists($request->fresh()->document_path))->toBeFalse();
+
+    Livewire::test(ViewVerificationRequest::class, ['record' => $request->id])
+        ->assertSuccessful()
+        ->assertSee('Documento ya no disponible');
+});
+
+// ---------------------------------------------------------------------------
+// Ruta de streaming del documento/selfie — nunca S3, autenticada por sesión
+// del guard `admin` (ver constitution.md → "Media Upload Pipeline",
+// excepción documentada para Verification).
+// ---------------------------------------------------------------------------
+
+it('la ruta de streaming del documento exige el guard admin (sin sesión)', function () {
+    $request = VerificationRequest::factory()->create();
+
+    $this->get(route('filament.admin.resources.verification-requests.document', $request))
+        ->assertRedirect(); // Filament redirige al login del panel — nunca sirve el archivo
+});
+
+it('la ruta de streaming del documento exige el guard admin (usuario final autenticado con otro guard)', function () {
+    $request = VerificationRequest::factory()->create();
+    $user = User::factory()->withCompletedOnboarding()->create();
+
+    $this->actingAs($user) // guard 'web', nunca 'admin'
+        ->get(route('filament.admin.resources.verification-requests.document', $request))
+        ->assertRedirect();
+});
+
+it('un admin autenticado puede ver el documento en streaming si el archivo existe en disco', function () {
+    $request = VerificationRequest::factory()->create();
+    Storage::disk('local')->put($request->document_path, 'contenido-falso');
+
+    $this->actingAs($this->admin, 'admin')
+        ->get(route('filament.admin.resources.verification-requests.document', $request))
+        ->assertSuccessful();
+});
+
+it('la ruta de streaming retorna 404 limpio si el archivo ya no existe (solicitud ya revisada)', function () {
+    $request = VerificationRequest::factory()->create(); // factory no crea el archivo físico
+
+    $this->actingAs($this->admin, 'admin')
+        ->get(route('filament.admin.resources.verification-requests.document', $request))
+        ->assertNotFound();
 });

@@ -14,8 +14,8 @@ class SubmitVerificationRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'document_s3_key' => 'required|string|max:500',
-            'selfie_s3_key'   => 'sometimes|nullable|string|max:500',
+            'document' => ['required', 'file', 'mimes:jpg,jpeg,png', 'max:10240'],
+            'selfie'   => ['sometimes', 'nullable', 'file', 'mimes:jpg,jpeg,png', 'max:10240'],
         ];
     }
 }

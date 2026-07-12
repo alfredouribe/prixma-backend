@@ -11,6 +11,7 @@ use Database\Seeders\GenderIdentitySeeder;
 use Database\Seeders\InterestSeeder;
 use Database\Seeders\OrientationSeeder;
 use Database\Seeders\PronounSeeder;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
@@ -294,6 +295,34 @@ describe('storePhoto', function () {
         $this->withToken($this->token)
             ->postJson('/api/profiles/me/photos', [])
             ->assertStatus(422);
+    });
+
+    // -----------------------------------------------------------------------
+    // Retrofit Media Upload Pipeline: la foto llega como multipart/form-data
+    // (campo `photo`, ver UploadPhotoRequest) y ProfileService::addPhoto()
+    // la comprime con ffmpeg antes de subir a S3 (mismo patrón que
+    // VerificationService::compressAndStore()). Si ffmpeg no puede procesar
+    // el archivo (corrupto/dañado), el service debe lanzar BusinessException
+    // -> 400 con mensaje legible, nunca un 500. Estos tests requieren el
+    // binario `ffmpeg` disponible en el PATH del entorno donde corre
+    // `php artisan test` (igual que los tests equivalentes de Verification).
+    // -----------------------------------------------------------------------
+
+    it('archivo corrupto (imagen inválida) retorna 400 y no crea la foto', function () {
+        // mimeType forzado a image/jpeg para pasar la validación de Form
+        // Request (mimes:jpeg,jpg,png,webp), pero el contenido no es una
+        // imagen real — simula un archivo dañado/incompleto. ffmpeg debe
+        // fallar al decodificarlo y el service debe convertir eso en un 400
+        // legible, nunca un 500.
+        $response = $this->withToken($this->token)
+            ->post('/api/profiles/me/photos', [
+                'photo' => UploadedFile::fake()->create('photo.jpg', 5, 'image/jpeg'),
+            ], ['Accept' => 'application/json']);
+
+        $response->assertStatus(400);
+        expect($response->json('message'))->toBeString()->not->toBeEmpty();
+
+        expect(ProfilePhoto::where('profile_id', $this->profile->id)->count())->toBe(0);
     });
 
 });
