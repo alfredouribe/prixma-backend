@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Conversation;
 use App\Models\Interest;
 use App\Models\Profile;
 use App\Models\UserMatch;
@@ -61,6 +62,102 @@ describe('explore', function () {
             ->getJson('/api/matching/explore')
             ->assertStatus(200)
             ->assertJsonStructure(['data']);
+    });
+
+    it('retorna gender_identities, orientations e interests como labels legibles, y el campo bio', function () {
+        $genderIdentity = \App\Models\GenderIdentity::first();
+        $orientation    = \App\Models\SexualOrientation::first();
+        $interest       = Interest::first();
+
+        ['profile' => $candidateProfile] = createUserWithProfile([
+            'bio' => 'Amante del café y las plantas',
+        ]);
+        $candidateProfile->genderIdentities()->attach($genderIdentity->id);
+        $candidateProfile->orientations()->attach($orientation->id);
+        $candidateProfile->interests()->attach($interest->id);
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/matching/explore')
+            ->assertStatus(200);
+
+        $card = collect($response->json('data'))->firstWhere('bio', 'Amante del café y las plantas');
+
+        expect($card)->not->toBeNull();
+        expect($card['gender_identities'])->toContain($genderIdentity->label);
+        expect($card['orientations'])->toContain($orientation->label);
+        expect($card['interests'])->toContain($interest->label);
+
+        // No deben filtrarse slugs crudos donde van labels
+        expect($card['gender_identities'])->not->toContain($genderIdentity->slug);
+        expect($card['orientations'])->not->toContain($orientation->slug);
+        expect($card['interests'])->not->toContain($interest->slug);
+    });
+
+    it('retorna los datos de perfil correctos para múltiples candidatos reales', function () {
+        // Regresión: profiles.* en el select colisionaba con users.id
+        // (mismo alias `id`), corrompiendo la PK del User hidratado y
+        // dejando $candidate->profile en null → TypeError en calculateScore().
+        //
+        // Se crean las preferencias del viewer explícitamente (en vez de
+        // dejar que getPreferences() las cree de forma perezosa) para
+        // aislar este test de un bug distinto y preexistente en
+        // getPreferences(): el modelo devuelto por ::create() no se
+        // refresca, así que age_min/age_max quedan null en PHP en la
+        // primera llamada de un usuario nuevo aunque la BD tenga
+        // defaults (18/55), rompiendo el filtro de edad.
+        \App\Models\UserMatchingPreference::create([
+            'user_id' => $this->user->id,
+            'age_min' => 18,
+            'age_max' => 55,
+            'max_distance_km' => 50,
+        ]);
+
+        ['user' => $candidate1, 'profile' => $profile1] = createUserWithProfile([
+            'display_name' => 'Candidata Uno',
+        ]);
+        ['user' => $candidate2, 'profile' => $profile2] = createUserWithProfile([
+            'display_name' => 'Candidata Dos',
+        ]);
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/matching/explore')
+            ->assertStatus(200);
+
+        $data = collect($response->json('data'));
+
+        expect($data)->toHaveCount(2);
+
+        $ids = $data->pluck('id');
+        expect($ids)->toContain((string) $candidate1->id, (string) $candidate2->id)
+            ->and($ids)->not->toContain((string) $profile1->id, (string) $profile2->id);
+
+        $names = $data->pluck('display_name');
+        expect($names)->toContain('Candidata Uno', 'Candidata Dos');
+    });
+
+    it('usuario nuevo sin preferencias previas obtiene explore no vacío', function () {
+        // Regresión del bug descrito arriba: getPreferences() creaba la fila
+        // con ::create() sin refrescarla, dejando age_min/age_max en null en
+        // PHP (aunque la BD sí aplicara los defaults 18/55 de la migración).
+        // subYears(null) rompía el rango de fechas en getExploreQueue() y
+        // dejaba el explore vacío, en silencio, en la primera llamada de todo
+        // usuario nuevo. A diferencia del test anterior, aquí NO se crean las
+        // preferencias explícitamente: se deja que getPreferences() las cree
+        // de forma perezosa, que es justo el camino que disparaba el bug.
+        ['user' => $candidate] = createUserWithProfile([
+            'display_name' => 'Candidata Nueva',
+        ]);
+
+        expect(\App\Models\UserMatchingPreference::where('user_id', $this->user->id)->exists())->toBeFalse();
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/matching/explore')
+            ->assertStatus(200);
+
+        $data = collect($response->json('data'));
+
+        expect($data)->not->toBeEmpty();
+        expect($data->pluck('display_name'))->toContain('Candidata Nueva');
     });
 
     it('excluye al usuario actual de los resultados', function () {
@@ -145,6 +242,41 @@ describe('explore', function () {
 
         $ids = collect($response->json('data'))->pluck('id');
         expect($ids)->not->toContain($incomplete->id);
+    });
+
+    it('usuario con intención partner no ve perfiles con intención friendship, community o mentorship', function () {
+        ['user' => $partnerUser, 'token' => $partnerToken] = createUserWithProfile(['intention' => 'partner']);
+        ['user' => $partnerCandidate] = createUserWithProfile(['intention' => 'partner']);
+        ['user' => $friendshipCandidate] = createUserWithProfile(['intention' => 'friendship']);
+        ['user' => $communityCandidate] = createUserWithProfile(['intention' => 'community']);
+        ['user' => $mentorshipCandidate] = createUserWithProfile(['intention' => 'mentorship']);
+
+        $response = $this->withToken($partnerToken)
+            ->getJson('/api/matching/explore')
+            ->assertStatus(200);
+
+        $ids = collect($response->json('data'))->pluck('id');
+        expect($ids)->toContain((string) $partnerCandidate->id);
+        expect($ids)->not->toContain(
+            (string) $friendshipCandidate->id,
+            (string) $communityCandidate->id,
+            (string) $mentorshipCandidate->id
+        );
+    });
+
+    it('usuario con intención friendship ve perfiles con intención community y mentorship pero no partner', function () {
+        ['user' => $friendshipUser, 'token' => $friendshipToken] = createUserWithProfile(['intention' => 'friendship']);
+        ['user' => $communityCandidate] = createUserWithProfile(['intention' => 'community']);
+        ['user' => $mentorshipCandidate] = createUserWithProfile(['intention' => 'mentorship']);
+        ['user' => $partnerCandidate] = createUserWithProfile(['intention' => 'partner']);
+
+        $response = $this->withToken($friendshipToken)
+            ->getJson('/api/matching/explore')
+            ->assertStatus(200);
+
+        $ids = collect($response->json('data'))->pluck('id');
+        expect($ids)->toContain((string) $communityCandidate->id, (string) $mentorshipCandidate->id);
+        expect($ids)->not->toContain((string) $partnerCandidate->id);
     });
 
 });
@@ -261,6 +393,38 @@ describe('swipe', function () {
             ])
             ->assertStatus(200)
             ->assertJsonPath('data.matched', true);
+    });
+
+    it('crea conversación automáticamente al hacer match', function () {
+        ['user' => $target] = createUserWithProfile();
+
+        Swipe::create([
+            'swiper_id' => $target->id,
+            'swiped_id' => $this->user->id,
+            'direction' => 'like',
+        ]);
+
+        $response = $this->withToken($this->token)
+            ->postJson('/api/matching/swipe', [
+                'swiped_id' => $target->id,
+                'direction' => 'like',
+            ])
+            ->assertStatus(200)
+            ->assertJsonPath('data.matched', true);
+
+        $matchId = $response->json('data.match_id');
+
+        [$id1, $id2] = $this->user->id < $target->id
+            ? [$this->user->id, $target->id]
+            : [$target->id, $this->user->id];
+
+        $this->assertDatabaseHas('conversations', [
+            'user_id_1' => $id1,
+            'user_id_2' => $id2,
+            'type' => 'match',
+            'status' => 'active',
+            'match_id' => $matchId,
+        ]);
     });
 
 });

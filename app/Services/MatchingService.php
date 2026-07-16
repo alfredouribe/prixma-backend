@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Conversation;
 use App\Models\Profile;
 use App\Models\UserMatch;
 use App\Models\Swipe;
@@ -33,7 +34,7 @@ class MatchingService
             ->where('users.onboarding_completed', true)
             ->join('profiles', 'profiles.user_id', '=', 'users.id')
             ->whereNotNull('profiles.display_name')
-            ->select('users.id', 'users.date_of_birth', 'profiles.*')
+            ->select('users.id', 'users.date_of_birth')
             ->with([
                 'profile.photos',
                 'profile.genderIdentities',
@@ -41,6 +42,17 @@ class MatchingService
                 'profile.pronouns',
                 'profile.interests',
             ]);
+
+        // Separación de intenciones — exclusión dura, no depende de
+        // user_matching_preferences y se aplica antes que los filtros
+        // de preferencias (ver spec.md → "Separación de intenciones").
+        $userIntention = $user->profile->intention;
+
+        if ($userIntention === 'partner') {
+            $query->where('profiles.intention', 'partner');
+        } else {
+            $query->whereIn('profiles.intention', ['friendship', 'community', 'mentorship']);
+        }
 
         // Age filter
         $minDob = Carbon::now()->subYears($prefs->age_max)->startOfDay();
@@ -132,6 +144,14 @@ class MatchingService
                 'user_id_2' => $id2,
             ]);
 
+            Conversation::create([
+                'user_id_1' => $id1,
+                'user_id_2' => $id2,
+                'type' => 'match',
+                'status' => 'active',
+                'match_id' => $match->id,
+            ]);
+
             return ['swiped' => true, 'matched' => true, 'match_id' => $match->id];
         });
     }
@@ -209,9 +229,21 @@ class MatchingService
 
     public function getPreferences(User $user): UserMatchingPreference
     {
-        return $user->matchingPreferences ?? UserMatchingPreference::create([
+        $prefs = $user->matchingPreferences ?? UserMatchingPreference::firstOrCreate([
             'user_id' => $user->id,
         ]);
+
+        // `firstOrCreate` inserta solo `user_id` cuando la fila no existía,
+        // dejando que MySQL aplique los defaults de columna en el INSERT
+        // (age_min: 18, age_max: 55, max_distance_km: 50, etc.). La instancia
+        // en memoria, sin embargo, no refleja esos defaults (los atributos
+        // nunca se asignaron en PHP) hasta recargarla — mismo patrón que
+        // `ProfileService::getSettings()`.
+        if ($prefs->wasRecentlyCreated) {
+            $prefs = $prefs->fresh();
+        }
+
+        return $prefs;
     }
 
     public function updatePreferences(User $user, array $data): UserMatchingPreference

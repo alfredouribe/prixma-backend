@@ -14,6 +14,7 @@ class UserResource extends JsonResource
             'email'               => $this->email,
             'status'              => $this->status,
             'onboarding_completed' => $this->onboarding_completed,
+            'intention'           => $this->profile?->intention,
             'email_verified_at'   => $this->email_verified_at,
             'created_at'          => $this->created_at,
         ];
