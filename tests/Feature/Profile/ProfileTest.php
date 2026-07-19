@@ -68,6 +68,36 @@ describe('me', function () {
         expect($response->json('data.statistics.events_count'))->toBe(0);
     });
 
+    it('cuenta matches reales en las estadísticas de ambos usuarios', function () {
+        $otherUser = User::factory()->withCompletedOnboarding()->create();
+        Profile::create([
+            'user_id'              => $otherUser->id,
+            'display_name'         => 'Roberto',
+            'city'                 => 'CDMX',
+            'intention'            => 'friendship',
+            'onboarding_step'      => 6,
+            'onboarding_completed' => true,
+        ]);
+
+        \App\Models\UserMatch::create([
+            'user_id_1' => $this->user->id,
+            'user_id_2' => $otherUser->id,
+        ]);
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/profiles/me')
+            ->assertStatus(200);
+
+        expect($response->json('data.statistics.matches_count'))->toBe(1);
+
+        $otherToken = $otherUser->createToken('mobile')->plainTextToken;
+        $otherResponse = $this->withToken($otherToken)
+            ->getJson('/api/profiles/me')
+            ->assertStatus(200);
+
+        expect($otherResponse->json('data.statistics.matches_count'))->toBe(1);
+    });
+
     it('incluye verification_status con el valor por defecto unverified', function () {
         $this->withToken($this->token)
             ->getJson('/api/profiles/me')
@@ -103,6 +133,26 @@ describe('me', function () {
         $this->getJson('/api/profiles/me')->assertStatus(401);
     });
 
+    it('expone latitude y longitude como float cuando el perfil las tiene guardadas', function () {
+        $this->profile->update(['latitude' => 20.6597, 'longitude' => -103.3496]);
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/profiles/me')
+            ->assertStatus(200)
+            ->assertJsonStructure(['data' => ['latitude', 'longitude']]);
+
+        expect($response->json('data.latitude'))->toBe(20.6597);
+        expect($response->json('data.longitude'))->toBe(-103.3496);
+    });
+
+    it('expone latitude y longitude como null cuando el perfil no las tiene guardadas', function () {
+        $this->withToken($this->token)
+            ->getJson('/api/profiles/me')
+            ->assertStatus(200)
+            ->assertJsonPath('data.latitude', null)
+            ->assertJsonPath('data.longitude', null);
+    });
+
 });
 
 // ---------------------------------------------------------------------------
@@ -129,6 +179,60 @@ describe('update', function () {
             'bio'          => 'Nueva bio.',
             'city'         => 'Guadalajara',
         ]);
+    });
+
+    it('actualiza city, latitude y longitude juntos', function () {
+        $this->withToken($this->token)
+            ->putJson('/api/profiles/me', [
+                'city'      => 'Guadalajara',
+                'latitude'  => 20.6597,
+                'longitude' => -103.3496,
+            ])
+            ->assertStatus(200)
+            ->assertJsonPath('data.city', 'Guadalajara')
+            ->assertJsonPath('data.latitude', 20.6597)
+            ->assertJsonPath('data.longitude', -103.3496);
+
+        $this->assertDatabaseHas('profiles', [
+            'user_id'   => $this->user->id,
+            'city'      => 'Guadalajara',
+            'latitude'  => 20.6597,
+            'longitude' => -103.3496,
+        ]);
+    });
+
+    it('permite actualizar solo city sin latitude/longitude (compatibilidad hacia atrás)', function () {
+        $this->withToken($this->token)
+            ->putJson('/api/profiles/me', [
+                'city' => 'Monterrey',
+            ])
+            ->assertStatus(200)
+            ->assertJsonPath('data.city', 'Monterrey');
+
+        $this->assertDatabaseHas('profiles', [
+            'user_id' => $this->user->id,
+            'city'    => 'Monterrey',
+        ]);
+    });
+
+    it('latitude fuera de rango falla validación', function () {
+        $this->withToken($this->token)
+            ->putJson('/api/profiles/me', [
+                'latitude'  => 200,
+                'longitude' => -103.3496,
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['latitude']);
+    });
+
+    it('longitude fuera de rango falla validación', function () {
+        $this->withToken($this->token)
+            ->putJson('/api/profiles/me', [
+                'latitude'  => 20.6597,
+                'longitude' => -200,
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['longitude']);
     });
 
     it('actualiza identidad de género sincronizando la tabla pivot', function () {
@@ -234,6 +338,81 @@ describe('show', function () {
             ->getJson("/api/profiles/{$otherProfile->id}")
             ->assertStatus(200)
             ->assertJsonPath('data.is_verified', false);
+    });
+
+    it('incluye age calculada desde date_of_birth y custom_interests del perfil', function () {
+        $otherUser    = User::factory()->withCompletedOnboarding()->create([
+            'date_of_birth' => now()->subYears(25)->format('Y-m-d'),
+        ]);
+        $otherProfile = Profile::create([
+            'user_id'          => $otherUser->id,
+            'display_name'     => 'Roberto',
+            'custom_interests' => 'Escalada, cerámica',
+        ]);
+
+        $this->withToken($this->token)
+            ->getJson("/api/profiles/{$otherProfile->id}")
+            ->assertStatus(200)
+            ->assertJsonPath('data.age', 25)
+            ->assertJsonPath('data.custom_interests', 'Escalada, cerámica');
+    });
+
+    it('incluye has_video en true cuando el video está procesado, aunque no haya match', function () {
+        $otherUser    = User::factory()->withCompletedOnboarding()->create();
+        $otherProfile = Profile::create([
+            'user_id'          => $otherUser->id,
+            'display_name'     => 'Roberto',
+            'video_url'        => 'videos/profiles/roberto.mp4',
+            'video_processed'  => true,
+        ]);
+
+        $this->withToken($this->token)
+            ->getJson("/api/profiles/{$otherProfile->id}")
+            ->assertStatus(200)
+            ->assertJsonPath('data.has_video', true);
+    });
+
+    it('NO incluye video_url si el visitante no tiene match con el dueño del perfil', function () {
+        $otherUser    = User::factory()->withCompletedOnboarding()->create();
+        $otherProfile = Profile::create([
+            'user_id'          => $otherUser->id,
+            'display_name'     => 'Roberto',
+            'video_url'        => 'videos/profiles/roberto.mp4',
+            'video_processed'  => true,
+        ]);
+
+        $response = $this->withToken($this->token)
+            ->getJson("/api/profiles/{$otherProfile->id}")
+            ->assertStatus(200)
+            ->assertJsonPath('data.has_video', true);
+
+        expect($response->json('data'))->not->toHaveKey('video_url');
+    });
+
+    it('incluye video_url cuando existe un match activo entre el visitante y el dueño del perfil', function () {
+        $otherUser    = User::factory()->withCompletedOnboarding()->create();
+        $otherProfile = Profile::create([
+            'user_id'          => $otherUser->id,
+            'display_name'     => 'Roberto',
+            'video_url'        => 'videos/profiles/roberto.mp4',
+            'video_processed'  => true,
+        ]);
+
+        [$id1, $id2] = $this->user->id < $otherUser->id
+            ? [$this->user->id, $otherUser->id]
+            : [$otherUser->id, $this->user->id];
+
+        \App\Models\UserMatch::create([
+            'user_id_1' => $id1,
+            'user_id_2' => $id2,
+        ]);
+
+        $response = $this->withToken($this->token)
+            ->getJson("/api/profiles/{$otherProfile->id}")
+            ->assertStatus(200)
+            ->assertJsonPath('data.has_video', true);
+
+        expect($response->json('data.video_url'))->toBeString()->not->toBeEmpty();
     });
 
 });

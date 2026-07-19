@@ -17,6 +17,8 @@ class UpdateProfileRequest extends FormRequest
             'display_name'           => 'sometimes|string|max:50',
             'bio'                    => 'sometimes|nullable|string|max:300',
             'city'                   => 'sometimes|nullable|string|max:100',
+            'latitude'               => 'sometimes|nullable|numeric|between:-90,90',
+            'longitude'              => 'sometimes|nullable|numeric|between:-180,180',
             'intention'              => 'sometimes|in:partner,friendship,community,mentorship',
             'gender_identity_ids'    => 'sometimes|array',
             'gender_identity_ids.*'  => 'uuid|exists:gender_identities,id',

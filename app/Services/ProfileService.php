@@ -36,6 +36,7 @@ class ProfileService
     public function getPublicProfile(string $uuid): Profile
     {
         $profile = Profile::with([
+            'user',
             'genderIdentities',
             'orientations',
             'pronouns',
@@ -51,7 +52,7 @@ class ProfileService
         $profile = $user->profile ?? abort(404);
 
         $scalarFields = [
-            'display_name', 'bio', 'city', 'intention',
+            'display_name', 'bio', 'city', 'latitude', 'longitude', 'intention',
             'custom_gender_identity', 'custom_orientation',
             'custom_pronouns', 'custom_interests',
         ];
@@ -268,8 +269,8 @@ class ProfileService
                 ->count()
             : 0;
 
-        $matchesCount = Schema::hasTable('user_matches')
-            ? DB::table('user_matches')
+        $matchesCount = Schema::hasTable('matches')
+            ? DB::table('matches')
                 ->where(function ($q) use ($profile) {
                     $q->where('user_id_1', $profile->user_id)
                       ->orWhere('user_id_2', $profile->user_id);

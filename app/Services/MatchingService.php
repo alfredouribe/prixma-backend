@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\AuthorizationException;
 use App\Models\Conversation;
 use App\Models\Profile;
 use App\Models\UserMatch;
@@ -16,6 +17,10 @@ class MatchingService
 {
     public function getExploreQueue(User $user, int $limit = 25): Collection
     {
+        if ($user->profile->verification_status !== 'verified') {
+            throw new AuthorizationException('Solo los perfiles verificados pueden explorar y dar like.');
+        }
+
         $prefs = $this->getPreferences($user);
 
         $alreadySwiped = Swipe::where('swiper_id', $user->id)
@@ -30,6 +35,8 @@ class MatchingService
         $query = User::query()
             ->where('users.id', '!=', $user->id)
             ->whereNotIn('users.id', $alreadySwiped)
+            ->whereNotIn('users.id', $user->blockedUserIds())
+            ->whereNotIn('users.id', $user->blockedByUserIds())
             ->where('users.status', 'active')
             ->where('users.onboarding_completed', true)
             ->join('profiles', 'profiles.user_id', '=', 'users.id')
@@ -113,6 +120,10 @@ class MatchingService
 
     public function recordSwipe(User $user, string $swipedId, string $direction): array
     {
+        if ($user->profile->verification_status !== 'verified') {
+            throw new AuthorizationException('Solo los perfiles verificados pueden explorar y dar like.');
+        }
+
         return DB::transaction(function () use ($user, $swipedId, $direction) {
             $swipe = Swipe::create([
                 'swiper_id' => $user->id,

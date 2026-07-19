@@ -46,7 +46,15 @@ beforeEach(function () {
         InterestSeeder::class,
     ]);
 
-    ['user' => $this->user, 'profile' => $this->profile, 'token' => $this->token] = createUserWithProfile();
+    // El actor ($this->user, quien hace las peticiones vía $this->token) debe
+    // estar verificado: getExploreQueue()/recordSwipe() ahora exigen
+    // verification_status === 'verified' antes de cualquier otra lógica (gate
+    // de verificación en backend, ver spec.md → "Gate de verificación (backend)").
+    // Los candidatos creados dentro de cada test siguen usando el default
+    // 'unverified' de createUserWithProfile() salvo que el test lo override.
+    ['user' => $this->user, 'profile' => $this->profile, 'token' => $this->token] = createUserWithProfile([
+        'verification_status' => 'verified',
+    ]);
 });
 
 // ---------------------------------------------------------------------------
@@ -245,7 +253,10 @@ describe('explore', function () {
     });
 
     it('usuario con intención partner no ve perfiles con intención friendship, community o mentorship', function () {
-        ['user' => $partnerUser, 'token' => $partnerToken] = createUserWithProfile(['intention' => 'partner']);
+        ['user' => $partnerUser, 'token' => $partnerToken] = createUserWithProfile([
+            'intention' => 'partner',
+            'verification_status' => 'verified',
+        ]);
         ['user' => $partnerCandidate] = createUserWithProfile(['intention' => 'partner']);
         ['user' => $friendshipCandidate] = createUserWithProfile(['intention' => 'friendship']);
         ['user' => $communityCandidate] = createUserWithProfile(['intention' => 'community']);
@@ -265,7 +276,10 @@ describe('explore', function () {
     });
 
     it('usuario con intención friendship ve perfiles con intención community y mentorship pero no partner', function () {
-        ['user' => $friendshipUser, 'token' => $friendshipToken] = createUserWithProfile(['intention' => 'friendship']);
+        ['user' => $friendshipUser, 'token' => $friendshipToken] = createUserWithProfile([
+            'intention' => 'friendship',
+            'verification_status' => 'verified',
+        ]);
         ['user' => $communityCandidate] = createUserWithProfile(['intention' => 'community']);
         ['user' => $mentorshipCandidate] = createUserWithProfile(['intention' => 'mentorship']);
         ['user' => $partnerCandidate] = createUserWithProfile(['intention' => 'partner']);
@@ -543,6 +557,40 @@ describe('matches list', function () {
 
         expect($response->json('data'))->toHaveCount(1);
         expect($response->json('data.0.other_user'))->not->toBeNull();
+    });
+
+});
+
+// ---------------------------------------------------------------------------
+// Gate de verificación (backend) — ver spec.md → "Gate de verificación (backend)"
+// ---------------------------------------------------------------------------
+
+describe('gate de verificación', function () {
+
+    it('usuario no verificado que llama explore recibe 403', function () {
+        ['token' => $unverifiedToken] = createUserWithProfile([
+            'verification_status' => 'unverified',
+        ]);
+
+        $this->withToken($unverifiedToken)
+            ->getJson('/api/matching/explore')
+            ->assertStatus(403)
+            ->assertJsonPath('message', 'Solo los perfiles verificados pueden explorar y dar like.');
+    });
+
+    it('usuario no verificado que llama swipe recibe 403', function () {
+        ['token' => $unverifiedToken] = createUserWithProfile([
+            'verification_status' => 'unverified',
+        ]);
+        ['user' => $target] = createUserWithProfile();
+
+        $this->withToken($unverifiedToken)
+            ->postJson('/api/matching/swipe', [
+                'swiped_id' => $target->id,
+                'direction' => 'like',
+            ])
+            ->assertStatus(403)
+            ->assertJsonPath('message', 'Solo los perfiles verificados pueden explorar y dar like.');
     });
 
 });

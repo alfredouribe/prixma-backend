@@ -23,6 +23,8 @@ class ProfileResource extends JsonResource
             'display_name'           => $this->display_name,
             'bio'                    => $this->bio,
             'city'                   => $this->city,
+            'latitude'               => $this->latitude !== null ? (float) $this->latitude : null,
+            'longitude'              => $this->longitude !== null ? (float) $this->longitude : null,
             'intention'              => $this->intention,
             'verification_status'    => $this->verification_status,
             'custom_gender_identity' => $this->custom_gender_identity,

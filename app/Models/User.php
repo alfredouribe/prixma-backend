@@ -72,4 +72,32 @@ class User extends Authenticatable
     {
         return UserMatch::where('user_id_1', $this->id)->orWhere('user_id_2', $this->id);
     }
+
+    public function blocksInitiated()
+    {
+        return $this->hasMany(Block::class, 'blocker_id');
+    }
+
+    public function blocksReceived()
+    {
+        return $this->hasMany(Block::class, 'blocked_id');
+    }
+
+    /**
+     * IDs de usuarios que este usuario bloqueó.
+     * Ver features/safety/specs/plan.md → "Integración con Matching".
+     */
+    public function blockedUserIds(): \Illuminate\Support\Collection
+    {
+        return Block::where('blocker_id', $this->id)->pluck('blocked_id');
+    }
+
+    /**
+     * IDs de usuarios que bloquearon a este usuario.
+     * Ver features/safety/specs/plan.md → "Integración con Matching".
+     */
+    public function blockedByUserIds(): \Illuminate\Support\Collection
+    {
+        return Block::where('blocked_id', $this->id)->pluck('blocker_id');
+    }
 }
