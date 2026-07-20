@@ -293,7 +293,7 @@ describe('show', function () {
         ]);
 
         $response = $this->withToken($this->token)
-            ->getJson("/api/profiles/{$otherProfile->id}")
+            ->getJson("/api/profiles/{$otherUser->id}")
             ->assertStatus(200)
             ->assertJsonPath('data.display_name', 'Roberto');
 
@@ -309,7 +309,36 @@ describe('show', function () {
     });
 
     it('requiere autenticación', function () {
-        $this->getJson("/api/profiles/{$this->profile->id}")->assertStatus(401);
+        $this->getJson("/api/profiles/{$this->profile->user_id}")->assertStatus(401);
+    });
+
+    it('retorna el id del User dueño (no el PK de Profile) en data.id', function () {
+        $otherUser    = User::factory()->withCompletedOnboarding()->create();
+        $otherProfile = Profile::create([
+            'user_id'      => $otherUser->id,
+            'display_name' => 'Roberto',
+            'intention'    => 'community',
+        ]);
+
+        expect((string) $otherProfile->id)->not->toBe((string) $otherUser->id);
+
+        $this->withToken($this->token)
+            ->getJson("/api/profiles/{$otherUser->id}")
+            ->assertStatus(200)
+            ->assertJsonPath('data.id', (string) $otherUser->id);
+    });
+
+    it('retorna 404 si se consulta con el PK de Profile en vez del id de User', function () {
+        $otherUser    = User::factory()->withCompletedOnboarding()->create();
+        $otherProfile = Profile::create([
+            'user_id'      => $otherUser->id,
+            'display_name' => 'Roberto',
+            'intention'    => 'community',
+        ]);
+
+        $this->withToken($this->token)
+            ->getJson("/api/profiles/{$otherProfile->id}")
+            ->assertStatus(404);
     });
 
     it('incluye is_verified en true cuando verification_status es verified', function () {
@@ -321,7 +350,7 @@ describe('show', function () {
         ]);
 
         $this->withToken($this->token)
-            ->getJson("/api/profiles/{$otherProfile->id}")
+            ->getJson("/api/profiles/{$otherUser->id}")
             ->assertStatus(200)
             ->assertJsonPath('data.is_verified', true);
     });
@@ -335,7 +364,7 @@ describe('show', function () {
         ]);
 
         $this->withToken($this->token)
-            ->getJson("/api/profiles/{$otherProfile->id}")
+            ->getJson("/api/profiles/{$otherUser->id}")
             ->assertStatus(200)
             ->assertJsonPath('data.is_verified', false);
     });
@@ -351,7 +380,7 @@ describe('show', function () {
         ]);
 
         $this->withToken($this->token)
-            ->getJson("/api/profiles/{$otherProfile->id}")
+            ->getJson("/api/profiles/{$otherUser->id}")
             ->assertStatus(200)
             ->assertJsonPath('data.age', 25)
             ->assertJsonPath('data.custom_interests', 'Escalada, cerámica');
@@ -367,7 +396,7 @@ describe('show', function () {
         ]);
 
         $this->withToken($this->token)
-            ->getJson("/api/profiles/{$otherProfile->id}")
+            ->getJson("/api/profiles/{$otherUser->id}")
             ->assertStatus(200)
             ->assertJsonPath('data.has_video', true);
     });
@@ -382,7 +411,7 @@ describe('show', function () {
         ]);
 
         $response = $this->withToken($this->token)
-            ->getJson("/api/profiles/{$otherProfile->id}")
+            ->getJson("/api/profiles/{$otherUser->id}")
             ->assertStatus(200)
             ->assertJsonPath('data.has_video', true);
 
@@ -408,7 +437,7 @@ describe('show', function () {
         ]);
 
         $response = $this->withToken($this->token)
-            ->getJson("/api/profiles/{$otherProfile->id}")
+            ->getJson("/api/profiles/{$otherUser->id}")
             ->assertStatus(200)
             ->assertJsonPath('data.has_video', true);
 

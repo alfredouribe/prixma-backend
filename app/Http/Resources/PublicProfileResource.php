@@ -15,7 +15,7 @@ class PublicProfileResource extends JsonResource
         $hasVideo = (bool) ($this->video_url && $this->video_processed);
 
         return [
-            'id'            => $this->id,
+            'id'            => $this->user_id,
             'display_name'  => $this->display_name,
             'age'           => $this->whenLoaded('user', fn() =>
                 $this->user?->date_of_birth ? Carbon::parse($this->user->date_of_birth)->age : null

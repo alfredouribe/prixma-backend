@@ -33,7 +33,15 @@ class ProfileService
         ];
     }
 
-    public function getPublicProfile(string $uuid): Profile
+    /**
+     * Busca un perfil público por el UUID del `User` dueño (no por el PK
+     * propio de `Profile`). Es la convención usada en todo el resto de la
+     * app (ExploreProfileResource, ConversationResource.other_user.id,
+     * SafetyService, ChatService::findConversationWithUser) — el frontend
+     * siempre identifica "a una persona" con `users.id`. Ver corrección
+     * 2026-07-19 en `features/profile/specs/plan.md`.
+     */
+    public function getPublicProfile(string $userId): Profile
     {
         $profile = Profile::with([
             'user',
@@ -42,7 +50,7 @@ class ProfileService
             'pronouns',
             'interests',
             'photos',
-        ])->findOrFail($uuid);
+        ])->where('user_id', $userId)->firstOrFail();
 
         return $profile;
     }
