@@ -3,9 +3,15 @@
 namespace App\Providers;
 
 use App\Models\Admin;
+use App\Models\Event;
+use App\Models\Report;
+use App\Models\User;
 use App\Models\VerificationRequest;
 use App\Observers\VerificationRequestObserver;
 use App\Policies\AdminPolicy;
+use App\Policies\EventPolicy;
+use App\Policies\ReportPolicy;
+use App\Policies\UserPolicy;
 use App\Policies\VerificationRequestPolicy;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -26,6 +32,9 @@ class AppServiceProvider extends ServiceProvider
         // explícitamente, nunca checks inline de rol dentro de los Resources.
         Gate::policy(VerificationRequest::class, VerificationRequestPolicy::class);
         Gate::policy(Admin::class, AdminPolicy::class);
+        Gate::policy(Report::class, ReportPolicy::class);
+        Gate::policy(User::class, UserPolicy::class);
+        Gate::policy(Event::class, EventPolicy::class);
 
         RateLimiter::for('auth', function (Request $request) {
             return Limit::perMinute(5)->by($request->ip());

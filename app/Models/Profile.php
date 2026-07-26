@@ -82,4 +82,28 @@ class Profile extends Model
     {
         return $this->hasMany(VerificationRequest::class)->orderByDesc('created_at');
     }
+
+    /**
+     * Snapshot congelado del perfil en un momento dado — usado por
+     * SafetyService::createReport() para adjuntar evidencia al reporte tal
+     * como se veía el perfil reportado al momento de reportar (ver
+     * features/safety/specs/plan.md → "Reporte con bloqueo automático").
+     */
+    public function toSnapshotArray(): array
+    {
+        return [
+            'display_name'          => $this->display_name,
+            'bio'                   => $this->bio,
+            'intention'              => $this->intention,
+            'photos'                 => $this->photos->pluck('url')->values()->all(),
+            'gender_identities'      => $this->genderIdentities->pluck('label')->values()->all(),
+            'custom_gender_identity' => $this->custom_gender_identity,
+            'orientations'           => $this->orientations->pluck('label')->values()->all(),
+            'custom_orientation'     => $this->custom_orientation,
+            'pronouns'               => $this->pronouns->pluck('label')->values()->all(),
+            'custom_pronouns'        => $this->custom_pronouns,
+            'interests'              => $this->interests->pluck('label')->values()->all(),
+            'custom_interests'       => $this->custom_interests,
+        ];
+    }
 }

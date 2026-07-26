@@ -68,6 +68,104 @@ it('la búsqueda por email del usuario también se resuelve en la query', functi
         ->assertCanNotSeeTableRecords($others);
 });
 
+it('la búsqueda por estado en español mapea al valor crudo en la query', function () {
+    $pending = VerificationRequest::factory()->create(['status' => 'pending']);
+    $approved = VerificationRequest::factory()->approved()->create();
+    $rejected = VerificationRequest::factory()->rejected()->create();
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ListVerificationRequests::class)
+        ->searchTable('pendiente')
+        ->assertCanSeeTableRecords([$pending])
+        ->assertCanNotSeeTableRecords([$approved, $rejected]);
+
+    Livewire::test(ListVerificationRequests::class)
+        ->searchTable('aprobado')
+        ->assertCanSeeTableRecords([$approved])
+        ->assertCanNotSeeTableRecords([$pending, $rejected]);
+
+    Livewire::test(ListVerificationRequests::class)
+        ->searchTable('rechazado')
+        ->assertCanSeeTableRecords([$rejected])
+        ->assertCanNotSeeTableRecords([$pending, $approved]);
+});
+
+it('la búsqueda por estado también acepta el valor crudo en inglés', function () {
+    $pending = VerificationRequest::factory()->create(['status' => 'pending']);
+    $others = collect([
+        VerificationRequest::factory()->approved()->create(),
+        VerificationRequest::factory()->rejected()->create(),
+    ]);
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ListVerificationRequests::class)
+        ->searchTable('pending')
+        ->assertCanSeeTableRecords([$pending])
+        ->assertCanNotSeeTableRecords($others);
+});
+
+it('un estado desconocido en el buscador no rompe la tabla ni trae resultados por esa columna', function () {
+    $requests = VerificationRequest::factory()->count(2)->create();
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ListVerificationRequests::class)
+        ->searchTable('zzz-estado-inexistente')
+        ->assertSuccessful()
+        ->assertCanNotSeeTableRecords($requests)
+        ->assertCountTableRecords(0);
+});
+
+it('la búsqueda por fecha (d/m/Y) encuentra solo las solicitudes de ese día', function () {
+    $target = VerificationRequest::factory()->create(['created_at' => '2026-07-23 10:00:00']);
+    $sameMonthDifferentDay = VerificationRequest::factory()->create(['created_at' => '2026-07-22 10:00:00']);
+    $differentYear = VerificationRequest::factory()->create(['created_at' => '2025-07-23 10:00:00']);
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ListVerificationRequests::class)
+        ->searchTable('23/07/2026')
+        ->assertCanSeeTableRecords([$target])
+        ->assertCanNotSeeTableRecords([$sameMonthDifferentDay, $differentYear]);
+});
+
+it('la búsqueda por fecha parcial mes/año filtra por whereMonth+whereYear', function () {
+    $target = VerificationRequest::factory()->create(['created_at' => '2026-07-05 10:00:00']);
+    $differentMonth = VerificationRequest::factory()->create(['created_at' => '2026-08-05 10:00:00']);
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ListVerificationRequests::class)
+        ->searchTable('07/2026')
+        ->assertCanSeeTableRecords([$target])
+        ->assertCanNotSeeTableRecords([$differentMonth]);
+});
+
+it('la búsqueda por fecha parcial solo año filtra por whereYear', function () {
+    $target = VerificationRequest::factory()->create(['created_at' => '2026-01-15 10:00:00']);
+    $differentYear = VerificationRequest::factory()->create(['created_at' => '2025-01-15 10:00:00']);
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ListVerificationRequests::class)
+        ->searchTable('2026')
+        ->assertCanSeeTableRecords([$target])
+        ->assertCanNotSeeTableRecords([$differentYear]);
+});
+
+it('una fecha inválida en el buscador no lanza excepción ni rompe la tabla', function () {
+    VerificationRequest::factory()->count(2)->create();
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ListVerificationRequests::class)
+        ->searchTable('31/02/2026') // 31 de febrero no existe
+        ->assertSuccessful()
+        ->assertCountTableRecords(0);
+});
+
 it('ordena por defecto de más antigua a más reciente (FIFO)', function () {
     $older = VerificationRequest::factory()->create(['created_at' => now()->subDays(2)]);
     $newer = VerificationRequest::factory()->create(['created_at' => now()->subDay()]);

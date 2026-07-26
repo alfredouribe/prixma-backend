@@ -84,6 +84,27 @@ class User extends Authenticatable
     }
 
     /**
+     * Reportes que este usuario envió (como reportante). Usado por el panel
+     * admin (`UserResource`/`ViewUser`, ver features/profile/specs/plan.md →
+     * "Panel admin — gestión de usuarios") para mostrar el historial de
+     * moderación de una cuenta. No existía ninguna relación en esta
+     * dirección — solo `Report::reporter()` (belongsTo, inversa).
+     */
+    public function reportsSent()
+    {
+        return $this->hasMany(Report::class, 'reporter_id');
+    }
+
+    /**
+     * Reportes que este usuario recibió (como reportado). Mismo uso que
+     * `reportsSent()` — ver nota arriba.
+     */
+    public function reportsReceived()
+    {
+        return $this->hasMany(Report::class, 'reported_id');
+    }
+
+    /**
      * IDs de usuarios que este usuario bloqueó.
      * Ver features/safety/specs/plan.md → "Integración con Matching".
      */

@@ -19,7 +19,11 @@ class SafetyController extends Controller
 
     public function storeReport(ReportRequest $request): JsonResponse
     {
-        $this->safetyService->reportUser($request->user(), $request->validated());
+        $this->safetyService->createReport(
+            $request->user(),
+            $request->input('reported_id'),
+            $request->only(['reason', 'description']),
+        );
 
         return response()->json([
             'message' => 'Reporte enviado. Gracias por ayudar a mantener Prixma segure.',

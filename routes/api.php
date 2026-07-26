@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Auth\AuthController;
 use App\Http\Controllers\Api\Chat\ConversationController;
 use App\Http\Controllers\Api\Chat\MessageController;
+use App\Http\Controllers\Api\Events\EventController;
 use App\Http\Controllers\Api\Matching\MatchingController;
 use App\Http\Controllers\Api\Onboarding\OnboardingController;
 use App\Http\Controllers\Api\Profile\ProfileController;
@@ -91,6 +92,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/requests', [ConversationController::class, 'storeRequest']);
         Route::patch('/requests/{uuid}/accept', [ConversationController::class, 'acceptRequest']);
         Route::patch('/requests/{uuid}/reject', [ConversationController::class, 'rejectRequest']);
+    });
+
+    // Solo lectura + RSVP — la creación/edición/borrado de eventos es
+    // exclusiva del panel admin (Filament), ver features/events/specs/spec.md
+    // → "Creación de eventos" (2026-07-26). No hay store/update/destroy aquí.
+    Route::prefix('events')->group(function () {
+        Route::get('/', [EventController::class, 'index']);
+        Route::get('/{uuid}', [EventController::class, 'show']);
+        Route::post('/{uuid}/rsvp', [EventController::class, 'rsvp']);
     });
 
     Route::prefix('safety')->group(function () {

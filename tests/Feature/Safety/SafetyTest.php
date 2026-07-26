@@ -2,11 +2,21 @@
 
 use App\Models\Block;
 use App\Models\Conversation;
+use App\Models\GenderIdentity;
 use App\Models\GeographicBlock;
+use App\Models\Interest;
+use App\Models\Message;
 use App\Models\Profile;
+use App\Models\ProfilePhoto;
 use App\Models\Report;
 use App\Models\User;
 use App\Models\UserMatch;
+use App\Services\SafetyService;
+use Database\Seeders\GenderIdentitySeeder;
+use Database\Seeders\InterestSeeder;
+use Database\Seeders\OrientationSeeder;
+use Database\Seeders\PronounSeeder;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 
@@ -33,6 +43,13 @@ function createSafetyUser(array $profileData = []): array
 }
 
 beforeEach(function () {
+    $this->seed([
+        GenderIdentitySeeder::class,
+        OrientationSeeder::class,
+        PronounSeeder::class,
+        InterestSeeder::class,
+    ]);
+
     ['user' => $this->user, 'profile' => $this->profile, 'token' => $this->token] = createSafetyUser();
 });
 
@@ -61,7 +78,7 @@ describe('reports', function () {
         ]);
     });
 
-    it('reporte duplicado al mismo usuario no lanza error', function () {
+    it('reporte duplicado al mismo usuario crea una fila nueva cada vez', function () {
         ['user' => $target] = createSafetyUser();
 
         $this->withToken($this->token)
@@ -79,14 +96,138 @@ describe('reports', function () {
             ])
             ->assertStatus(201);
 
-        // Solo se conserva el reporte más reciente para el mismo par.
-        $this->assertDatabaseCount('reports', 1);
+        // Cada reporte es una fila nueva con su propia evidencia — ya no es
+        // idempotente (Report::create(), no updateOrCreate()).
+        $this->assertDatabaseCount('reports', 2);
+        $this->assertDatabaseHas('reports', [
+            'reporter_id' => $this->user->id,
+            'reported_id' => $target->id,
+            'reason'      => 'harassment',
+            'status'      => 'pending',
+        ]);
         $this->assertDatabaseHas('reports', [
             'reporter_id' => $this->user->id,
             'reported_id' => $target->id,
             'reason'      => 'fake_profile',
             'status'      => 'pending',
         ]);
+    });
+
+    it('crear reporte también crea bloqueo en la misma transacción', function () {
+        ['user' => $target] = createSafetyUser();
+
+        $this->withToken($this->token)
+            ->postJson('/api/safety/reports', [
+                'reported_id' => $target->id,
+                'reason'      => 'harassment',
+            ])
+            ->assertStatus(201);
+
+        $this->assertDatabaseHas('blocks', [
+            'blocker_id' => $this->user->id,
+            'blocked_id' => $target->id,
+        ]);
+    });
+
+    it('si falla la creación del reporte, no se crea el bloqueo (rollback de transacción)', function () {
+        $safetyService = app(SafetyService::class);
+        $nonExistentReportedId = (string) \Illuminate\Support\Str::uuid();
+
+        expect(fn () => $safetyService->createReport(
+            $this->user,
+            $nonExistentReportedId,
+            ['reason' => 'harassment'],
+        ))->toThrow(ModelNotFoundException::class);
+
+        $this->assertDatabaseCount('reports', 0);
+        $this->assertDatabaseCount('blocks', 0);
+    });
+
+    it('reporte guarda snapshot del perfil correctamente', function () {
+        $identity = GenderIdentity::first();
+        $interest = Interest::first();
+
+        $target = User::factory()->withCompletedOnboarding()->create();
+        $targetProfile = Profile::create([
+            'user_id'              => $target->id,
+            'display_name'         => 'Perfil Reportado',
+            'bio'                  => 'Bio del reportado.',
+            'city'                 => 'GDL',
+            'intention'            => 'partner',
+            'onboarding_step'      => 6,
+            'onboarding_completed' => true,
+        ]);
+        $targetProfile->genderIdentities()->attach($identity->id);
+        $targetProfile->interests()->attach($interest->id);
+        ProfilePhoto::create([
+            'profile_id' => $targetProfile->id,
+            'url'        => 'https://s3.example.com/profiles/photos/target/1.jpg',
+            'key'        => 'profiles/photos/target/1.jpg',
+            'position'   => 0,
+        ]);
+
+        $this->withToken($this->token)
+            ->postJson('/api/safety/reports', [
+                'reported_id' => $target->id,
+                'reason'      => 'harassment',
+            ])
+            ->assertStatus(201);
+
+        $report = Report::where('reporter_id', $this->user->id)
+            ->where('reported_id', $target->id)
+            ->firstOrFail();
+
+        expect($report->profile_snapshot['display_name'])->toBe('Perfil Reportado');
+        expect($report->profile_snapshot['bio'])->toBe('Bio del reportado.');
+        expect($report->profile_snapshot['photos'])->toBe(['https://s3.example.com/profiles/photos/target/1.jpg']);
+        expect($report->profile_snapshot['gender_identities'])->toBe([$identity->label]);
+        expect($report->profile_snapshot['interests'])->toBe([$interest->label]);
+    });
+
+    it('reporte guarda últimos 20 mensajes si existe conversación', function () {
+        ['user' => $target] = createSafetyUser();
+
+        $conversation = Conversation::factory()->betweenUsers($this->user, $target)->create();
+
+        foreach (range(0, 24) as $i) {
+            Message::factory()->for($conversation)->create([
+                'sender_id'  => $this->user->id,
+                'content'    => "mensaje-{$i}",
+                'created_at' => now()->addSeconds($i),
+            ]);
+        }
+
+        $this->withToken($this->token)
+            ->postJson('/api/safety/reports', [
+                'reported_id' => $target->id,
+                'reason'      => 'harassment',
+            ])
+            ->assertStatus(201);
+
+        $report = Report::where('reporter_id', $this->user->id)
+            ->where('reported_id', $target->id)
+            ->firstOrFail();
+
+        expect($report->chat_snapshot)->toHaveCount(20);
+        expect($report->chat_snapshot[0]['content'])->toBe('mensaje-5');
+        expect($report->chat_snapshot[19]['content'])->toBe('mensaje-24');
+    });
+
+    it('reporte funciona aunque no haya conversación previa', function () {
+        ['user' => $target] = createSafetyUser();
+
+        $this->withToken($this->token)
+            ->postJson('/api/safety/reports', [
+                'reported_id' => $target->id,
+                'reason'      => 'harassment',
+            ])
+            ->assertStatus(201);
+
+        $report = Report::where('reporter_id', $this->user->id)
+            ->where('reported_id', $target->id)
+            ->firstOrFail();
+
+        expect($report->chat_snapshot)->toBe([]);
     });
 
     it('rechaza reportarse a sí mismo', function () {

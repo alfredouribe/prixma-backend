@@ -6,6 +6,7 @@ use App\Exceptions\BusinessException;
 use App\Models\Block;
 use App\Models\Conversation;
 use App\Models\GeographicBlock;
+use App\Models\Message;
 use App\Models\Report;
 use App\Models\User;
 use App\Models\UserMatch;
@@ -15,31 +16,55 @@ use Illuminate\Support\Facades\DB;
 class SafetyService
 {
     /**
-     * Crea o actualiza un reporte. Se usa `updateOrCreate` sobre
-     * (reporter_id, reported_id) para que un reporte repetido del mismo
-     * usuario al mismo objetivo nunca lance un error (idempotente) y para
-     * que "solo se guarde el más reciente" (domain.md → Report, política
-     * elegida entre las dos permitidas ahí) — reabre la revisión con
-     * status `pending` aunque el reporte anterior ya hubiera sido
-     * revisado/resuelto.
+     * Crea un reporte y bloquea automáticamente al reportado en la misma
+     * transacción atómica (cambio de comportamiento confirmado con el
+     * humano 2026-07-23 — ver features/safety/specs/plan.md → "Reporte con
+     * bloqueo automático"). Cada llamada crea una fila nueva (ya no es
+     * idempotente vía updateOrCreate): cada reporte adjunta su propia
+     * evidencia (snapshot del perfil reportado + hasta 20 mensajes previos
+     * entre ambos) tal como se veían en el momento de ESE reporte.
+     * Reusa `blockUser()` tal cual existe (anula el `UserMatch` + oculta la
+     * `Conversation`) en vez de reimplementar el bloqueo a mano, así un
+     * bloqueo por reporte se comporta idéntico a uno manual.
      */
-    public function reportUser(User $reporter, array $data): Report
+    public function createReport(User $reporter, string $reportedId, array $data): Report
     {
-        if ($reporter->id === $data['reported_id']) {
+        if ($reporter->id === $reportedId) {
             throw new BusinessException('No puedes reportarte a ti mismo.');
         }
 
-        return Report::updateOrCreate(
-            [
-                'reporter_id' => $reporter->id,
-                'reported_id' => $data['reported_id'],
-            ],
-            [
-                'reason'      => $data['reason'],
-                'description' => $data['description'] ?? null,
-                'status'      => 'pending',
-            ]
-        );
+        return DB::transaction(function () use ($reporter, $reportedId, $data) {
+            $reportedUser = User::with([
+                'profile.photos',
+                'profile.genderIdentities',
+                'profile.orientations',
+                'profile.pronouns',
+                'profile.interests',
+            ])->findOrFail($reportedId);
+
+            $conversation = Conversation::betweenUsers($reporter->id, $reportedId)->first();
+
+            $messages = $conversation
+                ? $conversation->messages()->latest()->limit(20)->get()->reverse()->values()
+                : collect();
+
+            $report = Report::create([
+                'reporter_id'      => $reporter->id,
+                'reported_id'      => $reportedId,
+                'reason'           => $data['reason'],
+                'description'      => $data['description'] ?? null,
+                'profile_snapshot' => $reportedUser->profile?->toSnapshotArray() ?? [],
+                'chat_snapshot'    => $messages->toArray(),
+                'status'           => 'pending',
+            ]);
+
+            // Reusa blockUser() completo (Block::firstOrCreate + anula UserMatch
+            // + oculta Conversation) — mismo comportamiento que un bloqueo
+            // manual, decisión confirmada con el humano.
+            $this->blockUser($reporter, $reportedId);
+
+            return $report;
+        });
     }
 
     /**
@@ -120,5 +145,72 @@ class SafetyService
             ->where('user_id', $user->id)
             ->firstOrFail()
             ->delete();
+    }
+
+    /**
+     * Transiciones de estado de un reporte — solo las usa el panel admin
+     * (`ReportResource`, ver features/safety/specs/plan.md → "Panel admin —
+     * gestión de reportes"). No hay endpoint móvil que las exponga.
+     * `domain.md` → `Report` no define `reviewed_by`/`reviewed_at` (a
+     * diferencia de `VerificationRequest`), así que la transición es solo
+     * un cambio de `status`, sin auditoría de quién revisó.
+     */
+    public function markReportAsReviewed(Report $report): Report
+    {
+        $report->update(['status' => 'reviewed']);
+
+        return $report->fresh();
+    }
+
+    public function markReportAsResolved(Report $report): Report
+    {
+        $report->update(['status' => 'resolved']);
+
+        return $report->fresh();
+    }
+
+    /**
+     * Fotos del perfil del usuario reportado — para el detalle del reporte
+     * en el panel admin (ver features/safety/specs/plan.md → "Panel admin —
+     * gestión de reportes" → "Fotos del perfil reportado"). Devuelve una
+     * colección vacía (nunca null) si el reportado no completó su perfil o
+     * no subió fotos, para que la Page no tenga que manejar ese caso.
+     */
+    public function getReportedUserPhotos(Report $report): Collection
+    {
+        return $report->reported->profile?->photos ?? collect();
+    }
+
+    /**
+     * Hasta `$limit` mensajes — los más recientes primero, reordenados a
+     * cronológico ascendente al final — de TODAS las conversaciones donde
+     * participó el usuario reportado, filtrados al mismo día calendario en
+     * que se creó el reporte (`report.created_at`). Incluye ambos lados de
+     * cada conversación (lo que escribió el reportado y lo que escribió la
+     * otra persona) y puede abarcar más de una conversación si el reportado
+     * tuvo actividad en varias ese día — alcance confirmado con el humano,
+     * ver features/safety/specs/plan.md.
+     *
+     * Usa el scope `Conversation::forUser()` ya existente (mismo que usa
+     * Chat) para encontrar las conversaciones del reportado en vez de
+     * andar armando la condición user_id_1/user_id_2 a mano aquí. Los
+     * mensajes soft-deleted quedan excluidos automáticamente por el default
+     * scope de `Message` (SoftDeletes) — nunca se usa `withTrashed()`.
+     */
+    public function getReportedUserMessagesForReportDate(Report $report, int $limit = 20): Collection
+    {
+        $reportedUser = $report->reported;
+        $reportDate = $report->created_at->toDateString();
+
+        $conversationIds = Conversation::forUser($reportedUser)->pluck('id');
+
+        return Message::whereIn('conversation_id', $conversationIds)
+            ->whereDate('created_at', $reportDate)
+            ->with('sender.profile')
+            ->orderByDesc('created_at')
+            ->limit($limit)
+            ->get()
+            ->sortBy('created_at')
+            ->values();
     }
 }

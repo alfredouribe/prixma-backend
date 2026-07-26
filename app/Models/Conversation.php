@@ -62,4 +62,19 @@ class Conversation extends Model
             $q->where('user_id_1', $user->id)->orWhere('user_id_2', $user->id);
         });
     }
+
+    /**
+     * Filtra la conversación entre dos usuarios específicos, sin importar el
+     * orden en que se pasen los IDs. Mismo criterio de orden que
+     * `ChatService::sortIds()`/`MatchingService` (`user_id_1` siempre el
+     * UUID menor). Usado por `SafetyService::createReport()` para adjuntar
+     * evidencia de chat al reporte — ver
+     * features/safety/specs/plan.md → "Reporte con bloqueo automático".
+     */
+    public function scopeBetweenUsers(Builder $query, string $userId1, string $userId2): Builder
+    {
+        [$id1, $id2] = $userId1 < $userId2 ? [$userId1, $userId2] : [$userId2, $userId1];
+
+        return $query->where('user_id_1', $id1)->where('user_id_2', $id2);
+    }
 }
