@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Exceptions\AuthorizationException;
+use App\Exceptions\LikeLimitExceededException;
 use App\Models\Conversation;
+use App\Models\PlatformSetting;
 use App\Models\Profile;
 use App\Models\UserMatch;
 use App\Models\Swipe;
@@ -39,6 +41,11 @@ class MatchingService
             ->whereNotIn('users.id', $alreadySwiped)
             ->whereNotIn('users.id', $user->blockedUserIds())
             ->whereNotIn('users.id', $user->blockedByUserIds())
+            // Modo incógnito (features/safety/specs/spec.md → "Modo incógnito"):
+            // quien lo activa deja de aparecer en la cola de cualquier otro
+            // usuario. No afecta lo que el propio usuario en incógnito ve —
+            // solo cambia cómo lo ven los demás.
+            ->whereDoesntHave('settings', fn ($q) => $q->where('incognito_mode_enabled', true))
             ->where('users.status', 'active')
             ->where('users.onboarding_completed', true)
             ->join('profiles', 'profiles.user_id', '=', 'users.id')
@@ -124,6 +131,22 @@ class MatchingService
     {
         if ($user->profile->verification_status !== 'verified') {
             throw new AuthorizationException('Solo los perfiles verificados pueden explorar y dar like.');
+        }
+
+        // Límite diario de likes/super_likes para usuarios sin Prixma+ — ver
+        // features/premium/specs/spec.md → "Paywall al agotar likes del
+        // día". `dislike` nunca cuenta ni se limita. Se valida aquí (server
+        // side) porque, a diferencia de la frecuencia de ads, sí es una
+        // regla de negocio con valor económico real.
+        if (!$user->is_premium && in_array($direction, ['like', 'super_like'], true)) {
+            $todayLikes = Swipe::where('swiper_id', $user->id)
+                ->whereIn('direction', ['like', 'super_like'])
+                ->whereDate('created_at', now()->toDateString())
+                ->count();
+
+            if ($todayLikes >= PlatformSetting::current()->free_likes_per_day) {
+                throw new LikeLimitExceededException('Alcanzaste tu límite diario de likes. Actualiza a Prixma+ para dar likes ilimitados.');
+            }
         }
 
         $result = DB::transaction(function () use ($user, $swipedId, $direction) {

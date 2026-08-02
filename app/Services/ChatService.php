@@ -63,6 +63,22 @@ class ChatService
         return ['matches' => $matches, 'requests' => $requests];
     }
 
+    /**
+     * Total de mensajes no leídos del usuario, sumado entre todas sus
+     * conversaciones visibles (`active`/`pending` — mismo criterio que
+     * `getConversations()`: `rejected`/`blocked` no cuentan). Usado por el
+     * badge numérico del tab de Chats en el frontend.
+     */
+    public function unreadCount(User $user): int
+    {
+        return Message::whereNull('read_at')
+            ->where('sender_id', '!=', $user->id)
+            ->whereHas('conversation', function ($query) use ($user) {
+                $query->forUser($user)->whereIn('status', ['active', 'pending']);
+            })
+            ->count();
+    }
+
     public function getConversation(User $user, string $conversationId): Conversation
     {
         $conversation = Conversation::with(self::CONVERSATION_RELATIONS)->findOrFail($conversationId);

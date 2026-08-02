@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\Events\EventController;
 use App\Http\Controllers\Api\Matching\MatchingController;
 use App\Http\Controllers\Api\Notifications\NotificationController;
 use App\Http\Controllers\Api\Onboarding\OnboardingController;
+use App\Http\Controllers\Api\Premium\PremiumSettingsController;
 use App\Http\Controllers\Api\Profile\ProfileController;
 use App\Http\Controllers\Api\Safety\SafetyController;
 use App\Http\Controllers\Api\Verification\VerificationController;
@@ -83,8 +84,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/preferences', [MatchingController::class, 'updatePreferences']);
     });
 
+    Route::get('/premium/settings', [PremiumSettingsController::class, 'show']);
+
     Route::prefix('chat')->group(function () {
         Route::get('/conversations', [ConversationController::class, 'index']);
+        Route::get('/unread-count', [ConversationController::class, 'unreadCount']);
         Route::get('/conversations/with/{userUuid}', [ConversationController::class, 'withUser']);
         Route::get('/conversations/{uuid}', [ConversationController::class, 'show']);
         Route::get('/conversations/{uuid}/messages', [MessageController::class, 'index']);

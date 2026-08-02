@@ -95,6 +95,10 @@ class UserResource extends Resource
                     })
                     ->formatStateUsing(fn (string $state): string => static::verificationLabels()[$state] ?? $state),
 
+                Tables\Columns\IconColumn::make('is_premium')
+                    ->label('Premium')
+                    ->boolean(),
+
                 Tables\Columns\TextColumn::make('reports_received_count')
                     ->label('Reportes recibidos')
                     ->sortable(),
@@ -124,6 +128,18 @@ class UserResource extends Resource
             ])
             ->actions([
                 Tables\Actions\ViewAction::make(),
+
+                // Única excepción al "solo lectura" de este recurso (ver
+                // comentario en form() arriba) — features/premium/specs/
+                // necesita una forma de marcar usuarios como Premium
+                // mientras no exista compra real. Acción puntual y
+                // confirmada, no un formulario de edición general.
+                Tables\Actions\Action::make('togglePremium')
+                    ->label(fn (User $record): string => $record->is_premium ? 'Quitar Premium' : 'Activar Premium')
+                    ->icon('heroicon-o-star')
+                    ->color(fn (User $record): string => $record->is_premium ? 'gray' : 'warning')
+                    ->requiresConfirmation()
+                    ->action(fn (User $record) => $record->update(['is_premium' => !$record->is_premium])),
             ])
             ->defaultSort('created_at', 'desc')
             ->paginated([10, 25, 50]);

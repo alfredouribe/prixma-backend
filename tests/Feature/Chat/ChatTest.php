@@ -108,6 +108,82 @@ describe('GET /api/chat/conversations', function () {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/chat/unread-count
+// ---------------------------------------------------------------------------
+
+describe('GET /api/chat/unread-count', function () {
+    it('suma los mensajes no leídos de todas las conversaciones activas y pendientes', function () {
+        ['user' => $matchUser] = createChatUser();
+        ['user' => $requesterUser] = createChatUser();
+
+        [$id1, $id2] = sortedIds($this->user->id, $matchUser->id);
+        $matchConversation = Conversation::create([
+            'user_id_1' => $id1,
+            'user_id_2' => $id2,
+            'type' => 'match',
+            'status' => 'active',
+        ]);
+        Message::create(['conversation_id' => $matchConversation->id, 'sender_id' => $matchUser->id, 'content' => 'Hola']);
+        Message::create(['conversation_id' => $matchConversation->id, 'sender_id' => $matchUser->id, 'content' => '¿Cómo estás?']);
+
+        [$rid1, $rid2] = sortedIds($this->user->id, $requesterUser->id);
+        $requestConversation = Conversation::create([
+            'user_id_1' => $rid1,
+            'user_id_2' => $rid2,
+            'type' => 'request',
+            'status' => 'pending',
+        ]);
+        Message::create(['conversation_id' => $requestConversation->id, 'sender_id' => $requesterUser->id, 'content' => 'Solicitud']);
+
+        $this->withToken($this->token)
+            ->getJson('/api/chat/unread-count')
+            ->assertStatus(200)
+            ->assertJsonPath('count', 3);
+    });
+
+    it('no cuenta mensajes propios ni ya leídos', function () {
+        ['user' => $matchUser] = createChatUser();
+
+        [$id1, $id2] = sortedIds($this->user->id, $matchUser->id);
+        $conversation = Conversation::create([
+            'user_id_1' => $id1,
+            'user_id_2' => $id2,
+            'type' => 'match',
+            'status' => 'active',
+        ]);
+        Message::create(['conversation_id' => $conversation->id, 'sender_id' => $this->user->id, 'content' => 'Mío']);
+        Message::create(['conversation_id' => $conversation->id, 'sender_id' => $matchUser->id, 'content' => 'Ya leído', 'read_at' => now()]);
+
+        $this->withToken($this->token)
+            ->getJson('/api/chat/unread-count')
+            ->assertStatus(200)
+            ->assertJsonPath('count', 0);
+    });
+
+    it('no cuenta mensajes de conversaciones rechazadas ni bloqueadas', function () {
+        ['user' => $otherUser] = createChatUser();
+
+        [$id1, $id2] = sortedIds($this->user->id, $otherUser->id);
+        $conversation = Conversation::create([
+            'user_id_1' => $id1,
+            'user_id_2' => $id2,
+            'type' => 'request',
+            'status' => 'rejected',
+        ]);
+        Message::create(['conversation_id' => $conversation->id, 'sender_id' => $otherUser->id, 'content' => 'Hola']);
+
+        $this->withToken($this->token)
+            ->getJson('/api/chat/unread-count')
+            ->assertStatus(200)
+            ->assertJsonPath('count', 0);
+    });
+
+    it('requiere autenticación', function () {
+        $this->getJson('/api/chat/unread-count')->assertStatus(401);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/chat/conversations/{id}
 // ---------------------------------------------------------------------------
 

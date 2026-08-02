@@ -262,6 +262,33 @@ it('el detalle de un usuario sin perfil (onboarding incompleto) no rompe la vist
 });
 
 // ---------------------------------------------------------------------------
+// Toggle de Premium (features/premium/specs/) — única excepción al
+// "solo lectura" de este recurso, ver comentario en UserResource::table().
+// ---------------------------------------------------------------------------
+
+it('activa Premium para un usuario que no lo tiene', function () {
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create(['is_premium' => false]);
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ListUsers::class)
+        ->callTableAction('togglePremium', $user);
+
+    expect($user->fresh()->is_premium)->toBeTrue();
+});
+
+it('quita Premium a un usuario que ya lo tiene', function () {
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create(['is_premium' => true]);
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ListUsers::class)
+        ->callTableAction('togglePremium', $user);
+
+    expect($user->fresh()->is_premium)->toBeFalse();
+});
+
+// ---------------------------------------------------------------------------
 // Autorización
 // ---------------------------------------------------------------------------
 

@@ -45,6 +45,11 @@ class ConversationController extends Controller
         return response()->json(['data' => new ConversationResource($conversation)]);
     }
 
+    public function unreadCount(Request $request): JsonResponse
+    {
+        return response()->json(['count' => $this->chatService->unreadCount($request->user())]);
+    }
+
     public function markAsRead(Request $request, string $uuid): JsonResponse
     {
         $this->chatService->markAsRead($request->user(), $uuid);

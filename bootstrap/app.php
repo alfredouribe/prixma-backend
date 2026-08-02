@@ -2,6 +2,7 @@
 
 use App\Exceptions\AuthorizationException;
 use App\Exceptions\BusinessException;
+use App\Exceptions\LikeLimitExceededException;
 use App\Exceptions\UnauthorizedException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
@@ -29,7 +30,14 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions): void {
 
         $exceptions->render(function (BusinessException $e): JsonResponse {
-            return response()->json(['message' => $e->getMessage()], 400);
+            // LikeLimitExceededException (features/premium/specs/) usa 429
+            // en vez del 400 genérico — mismo código ya usado en el
+            // proyecto para throttling de auth (ThrottleRequestsException
+            // más abajo), permite al frontend distinguirla sin comparar el
+            // texto del mensaje.
+            $status = $e instanceof LikeLimitExceededException ? 429 : 400;
+
+            return response()->json(['message' => $e->getMessage()], $status);
         });
 
         $exceptions->render(function (AuthorizationException $e): JsonResponse {

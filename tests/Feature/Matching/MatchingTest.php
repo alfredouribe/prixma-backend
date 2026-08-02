@@ -5,7 +5,9 @@ use App\Jobs\SendSuperLikeNotification;
 use App\Models\Conversation;
 use App\Models\Interest;
 use App\Models\Profile;
+use App\Models\PlatformSetting;
 use App\Models\UserMatch;
+use App\Models\UserSetting;
 use App\Models\Swipe;
 use App\Models\User;
 use App\Services\MatchingService;
@@ -208,6 +210,33 @@ describe('explore', function () {
         $ids = collect($response->json('data'))->pluck('id');
         expect($ids)->not->toContain($suspended->id);
         expect($ids)->not->toContain($banned->id);
+    });
+
+    it('excluye usuarios con modo incógnito activado (features/safety/specs/spec.md)', function () {
+        ['user' => $incognito] = createUserWithProfile();
+        UserSetting::create(['user_id' => $incognito->id, 'incognito_mode_enabled' => true]);
+
+        ['user' => $visible] = createUserWithProfile();
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/matching/explore')
+            ->assertStatus(200);
+
+        $ids = collect($response->json('data'))->pluck('id');
+        expect($ids)->not->toContain((string) $incognito->id);
+        expect($ids)->toContain((string) $visible->id);
+    });
+
+    it('el propio modo incógnito no afecta lo que el usuario ve en su explorar', function () {
+        UserSetting::create(['user_id' => $this->user->id, 'incognito_mode_enabled' => true]);
+        ['user' => $visible] = createUserWithProfile();
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/matching/explore')
+            ->assertStatus(200);
+
+        $ids = collect($response->json('data'))->pluck('id');
+        expect($ids)->toContain((string) $visible->id);
     });
 
     it('aplica filtro de edad correctamente', function () {
@@ -505,6 +534,103 @@ describe('swipe', function () {
             ->assertStatus(200);
 
         Queue::assertNotPushed(SendSuperLikeNotification::class);
+    });
+
+});
+
+// ---------------------------------------------------------------------------
+// Límite diario de likes (features/premium/specs/spec.md)
+// ---------------------------------------------------------------------------
+
+describe('límite de likes/día', function () {
+
+    it('rechaza el like que excede el límite diario para un usuario no premium', function () {
+        $settings = PlatformSetting::current();
+        $settings->update(['free_likes_per_day' => 2]);
+
+        for ($i = 0; $i < 2; $i++) {
+            ['user' => $target] = createUserWithProfile();
+            $this->withToken($this->token)
+                ->postJson('/api/matching/swipe', ['swiped_id' => $target->id, 'direction' => 'like'])
+                ->assertStatus(200);
+        }
+
+        ['user' => $thirdTarget] = createUserWithProfile();
+
+        $this->withToken($this->token)
+            ->postJson('/api/matching/swipe', ['swiped_id' => $thirdTarget->id, 'direction' => 'like'])
+            ->assertStatus(429);
+
+        $this->assertDatabaseMissing('swipes', [
+            'swiper_id' => $this->user->id,
+            'swiped_id' => $thirdTarget->id,
+        ]);
+    });
+
+    it('no rechaza a un usuario premium aunque exceda el límite', function () {
+        PlatformSetting::current()->update(['free_likes_per_day' => 1]);
+        $this->user->update(['is_premium' => true]);
+
+        for ($i = 0; $i < 3; $i++) {
+            ['user' => $target] = createUserWithProfile();
+            $this->withToken($this->token)
+                ->postJson('/api/matching/swipe', ['swiped_id' => $target->id, 'direction' => 'like'])
+                ->assertStatus(200);
+        }
+    });
+
+    it('dislike nunca cuenta para el límite', function () {
+        PlatformSetting::current()->update(['free_likes_per_day' => 1]);
+
+        for ($i = 0; $i < 5; $i++) {
+            ['user' => $target] = createUserWithProfile();
+            $this->withToken($this->token)
+                ->postJson('/api/matching/swipe', ['swiped_id' => $target->id, 'direction' => 'dislike'])
+                ->assertStatus(200);
+        }
+
+        ['user' => $likeTarget] = createUserWithProfile();
+        $this->withToken($this->token)
+            ->postJson('/api/matching/swipe', ['swiped_id' => $likeTarget->id, 'direction' => 'like'])
+            ->assertStatus(200);
+    });
+
+    it('respeta un free_likes_per_day distinto al default', function () {
+        PlatformSetting::current()->update(['free_likes_per_day' => 3]);
+
+        for ($i = 0; $i < 3; $i++) {
+            ['user' => $target] = createUserWithProfile();
+            $this->withToken($this->token)
+                ->postJson('/api/matching/swipe', ['swiped_id' => $target->id, 'direction' => 'like'])
+                ->assertStatus(200);
+        }
+
+        ['user' => $fourthTarget] = createUserWithProfile();
+        $this->withToken($this->token)
+            ->postJson('/api/matching/swipe', ['swiped_id' => $fourthTarget->id, 'direction' => 'like'])
+            ->assertStatus(429);
+    });
+
+    it('un like de un día anterior no cuenta para el límite de hoy', function () {
+        PlatformSetting::current()->update(['free_likes_per_day' => 1]);
+
+        ['user' => $yesterdayTarget] = createUserWithProfile();
+        // `Swipe::booted()` fija `created_at = now()` en `creating` sin
+        // importar lo que se pase a `create()` — se corrige después con una
+        // asignación directa (no pasa por `$fillable`, `save()` no vuelve a
+        // disparar el hook de `creating`).
+        $yesterdaySwipe = Swipe::create([
+            'swiper_id' => $this->user->id,
+            'swiped_id' => $yesterdayTarget->id,
+            'direction' => 'like',
+        ]);
+        $yesterdaySwipe->created_at = now()->subDay();
+        $yesterdaySwipe->save();
+
+        ['user' => $todayTarget] = createUserWithProfile();
+        $this->withToken($this->token)
+            ->postJson('/api/matching/swipe', ['swiped_id' => $todayTarget->id, 'direction' => 'like'])
+            ->assertStatus(200);
     });
 
 });

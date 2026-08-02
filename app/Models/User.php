@@ -25,6 +25,7 @@ class User extends Authenticatable
         'email_verified_at',
         'date_of_birth',
         'onboarding_completed',
+        'is_premium',
     ];
 
     protected $hidden = [
@@ -39,6 +40,7 @@ class User extends Authenticatable
             'privacy_accepted_at' => 'datetime',
             'date_of_birth' => 'date',
             'onboarding_completed' => 'boolean',
+            'is_premium' => 'boolean',
             'password' => 'hashed',
         ];
     }
