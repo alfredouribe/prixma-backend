@@ -277,6 +277,81 @@ describe('reports', function () {
 });
 
 // ---------------------------------------------------------------------------
+// SafetyService::banReportedUser() / unbanUser() — solo lo usa el panel
+// admin (ReportResource/UserResource), sin endpoint móvil. Mismo criterio
+// que markReportAsReviewed()/markReportAsResolved(): se prueba el Service
+// directo aquí (efectos secundarios reales: tokens, correo, auto-resolve);
+// la visibilidad/autorización del botón en Filament se prueba en
+// ReportResourceTest.php/UserResourceTest.php.
+// ---------------------------------------------------------------------------
+
+describe('banReportedUser / unbanUser (SafetyService)', function () {
+
+    it('banea al usuario reportado: status=banned, revoca tokens, resuelve el reporte y envía el correo', function () {
+        \Illuminate\Support\Facades\Mail::fake();
+
+        ['user' => $reported] = createSafetyUser();
+        // createSafetyUser() ya emite un token ('mobile') al crear el
+        // usuario — se agregan 2 más para simular varios dispositivos con
+        // sesión activa.
+        $reported->createToken('device-1');
+        $reported->createToken('device-2');
+        expect($reported->tokens()->count())->toBe(3);
+
+        $report = Report::create([
+            'reporter_id' => $this->user->id,
+            'reported_id' => $reported->id,
+            'reason'      => 'harassment',
+            'status'      => 'pending',
+        ]);
+
+        $result = app(SafetyService::class)->banReportedUser($report, 'Acoso');
+
+        expect($reported->fresh()->status)->toBe('banned')
+            ->and($reported->tokens()->count())->toBe(0)
+            ->and($result->status)->toBe('resolved');
+
+        \Illuminate\Support\Facades\Mail::assertQueued(\App\Mail\UserBannedMail::class, function ($mail) use ($reported) {
+            return $mail->hasTo($reported->email) && $mail->reasonLabel === 'Acoso';
+        });
+    });
+
+    it('un usuario baneado ya no puede iniciar sesión, ni siquiera con el token que ya tenía', function () {
+        ['user' => $reported] = createSafetyUser();
+        $oldToken = $reported->createToken('device-1')->plainTextToken;
+
+        $report = Report::create([
+            'reporter_id' => $this->user->id,
+            'reported_id' => $reported->id,
+            'reason'      => 'harassment',
+            'status'      => 'pending',
+        ]);
+
+        app(SafetyService::class)->banReportedUser($report, 'Acoso');
+
+        $this->postJson('/api/auth/login', [
+            'email'    => $reported->email,
+            'password' => 'password',
+        ])->assertStatus(403);
+
+        $this->withToken($oldToken)
+            ->getJson('/api/profiles/me')
+            ->assertUnauthorized();
+    });
+
+    it('unbanUser revierte el status a active', function () {
+        ['user' => $reported] = createSafetyUser();
+        $reported->update(['status' => 'banned']);
+
+        $result = app(SafetyService::class)->unbanUser($reported);
+
+        expect($result->status)->toBe('active')
+            ->and($reported->fresh()->status)->toBe('active');
+    });
+
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/safety/blocks — bidireccionalidad + integración con Matching
 // ---------------------------------------------------------------------------
 

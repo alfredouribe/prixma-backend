@@ -289,6 +289,46 @@ it('quita Premium a un usuario que ya lo tiene', function () {
 });
 
 // ---------------------------------------------------------------------------
+// Quitar ban (features/safety/specs/plan.md → "Banear desde un reporte") —
+// segunda excepción al "solo lectura" de este recurso, mismo patrón que
+// togglePremium. Delega en SafetyService::unbanUser(), ya probado a nivel
+// de Service en tests/Feature/Safety/SafetyTest.php — aquí solo se cubre el
+// wiring de Filament.
+// ---------------------------------------------------------------------------
+
+it('quita el ban a un usuario baneado', function () {
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create(['status' => 'banned']);
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ListUsers::class)
+        ->callTableAction('unban', $user);
+
+    expect($user->fresh()->status)->toBe('active');
+});
+
+it('la acción de quitar ban no está visible para un usuario que no está baneado', function () {
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create(['status' => 'active']);
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ListUsers::class)
+        ->assertTableActionHidden('unban', $user);
+});
+
+it('un superadmin también puede quitar el ban', function () {
+    $superadmin = Admin::factory()->superadmin()->create();
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create(['status' => 'banned']);
+
+    $this->actingAs($superadmin, 'admin');
+
+    Livewire::test(ListUsers::class)
+        ->callTableAction('unban', $user);
+
+    expect($user->fresh()->status)->toBe('active');
+});
+
+// ---------------------------------------------------------------------------
 // Autorización
 // ---------------------------------------------------------------------------
 

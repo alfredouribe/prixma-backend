@@ -224,6 +224,77 @@ it('marcar como resuelto no modifica el status del usuario reportado — fuera d
 });
 
 // ---------------------------------------------------------------------------
+// Banear al usuario reportado — delega en SafetyService::banReportedUser()
+// (ver features/safety/specs/plan.md → "Banear desde un reporte"). Los
+// efectos secundarios del ban (tokens, correo, etc.) ya se prueban a nivel
+// de Service en tests/Feature/Safety/SafetyTest.php — aquí solo se cubre el
+// wiring de Filament: visibilidad, argumentos correctos, autorización.
+// ---------------------------------------------------------------------------
+
+it('admin puede banear al usuario reportado desde el detalle del reporte', function () {
+    $report = Report::factory()->create(['status' => 'pending', 'reason' => 'harassment']);
+    $reportedUser = $report->reported;
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ViewReport::class, ['record' => $report->id])
+        ->callAction('banUser');
+
+    expect($reportedUser->fresh()->status)->toBe('banned');
+    expect($report->fresh()->status)->toBe('resolved');
+});
+
+it('banear pasa la razón del reporte ya traducida a español al Service', function () {
+    $report = Report::factory()->create(['status' => 'pending', 'reason' => 'fake_profile']);
+
+    $this->actingAs($this->admin, 'admin');
+
+    $capturedReasonLabel = null;
+
+    // Partial mock (no mock()) — el infolist de ViewReport también llama a
+    // getReportedUserPhotos()/getReportedUserMessagesForReportDate() del
+    // mismo Service al renderizar, esas necesitan seguir ejecutando su
+    // implementación real.
+    $this->partialMock(SafetyService::class, function ($mock) use ($report, &$capturedReasonLabel) {
+        $mock->shouldReceive('banReportedUser')
+            ->once()
+            ->andReturnUsing(function (Report $r, string $reasonLabel) use (&$capturedReasonLabel, $report) {
+                $capturedReasonLabel = $reasonLabel;
+
+                return $report;
+            });
+    });
+
+    Livewire::test(ViewReport::class, ['record' => $report->id])
+        ->callAction('banUser');
+
+    expect($capturedReasonLabel)->toBe('Perfil falso');
+});
+
+it('no se puede banear a un usuario que ya está baneado — la acción no está visible', function () {
+    $report = Report::factory()->create(['status' => 'pending']);
+    $report->reported->update(['status' => 'banned']);
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ViewReport::class, ['record' => $report->id])
+        ->assertActionHidden('banUser');
+});
+
+it('un superadmin también puede banear', function () {
+    $superadmin = Admin::factory()->superadmin()->create();
+    $report = Report::factory()->create(['status' => 'pending']);
+    $reportedUser = $report->reported;
+
+    $this->actingAs($superadmin, 'admin');
+
+    Livewire::test(ViewReport::class, ['record' => $report->id])
+        ->callAction('banUser');
+
+    expect($reportedUser->fresh()->status)->toBe('banned');
+});
+
+// ---------------------------------------------------------------------------
 // Autorización — admin y superadmin pueden, usuario final nunca
 // ---------------------------------------------------------------------------
 

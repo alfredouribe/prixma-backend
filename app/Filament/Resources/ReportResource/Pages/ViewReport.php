@@ -206,6 +206,28 @@ class ViewReport extends ViewRecord
                         ->success()
                         ->send();
                 }),
+
+            Actions\Action::make('banUser')
+                ->label('Banear usuario')
+                ->color('danger')
+                ->icon('heroicon-o-no-symbol')
+                ->requiresConfirmation()
+                ->modalDescription('¿Confirmas que quieres banear a este usuario? Su cuenta quedará deshabilitada de inmediato (no podrá iniciar sesión ni seguir usando una sesión activa), se le enviará un correo notificándole el motivo, y este reporte se marcará automáticamente como resuelto. Esta acción se puede revertir después desde el detalle del usuario ("Quitar ban").')
+                ->visible(fn (Report $record): bool => $record->reported->status !== 'banned')
+                ->authorize(fn (Report $record): bool => (bool) auth('admin')->user()?->can('review', $record))
+                ->action(function (Report $record) {
+                    app(SafetyService::class)->banReportedUser(
+                        $record,
+                        ReportResource::reasonLabels()[$record->reason] ?? $record->reason,
+                    );
+
+                    $this->record->refresh();
+
+                    Notification::make()
+                        ->title('Usuario baneado')
+                        ->success()
+                        ->send();
+                }),
         ];
     }
 }

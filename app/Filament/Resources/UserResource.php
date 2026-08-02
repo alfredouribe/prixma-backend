@@ -4,6 +4,7 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\UserResource\Pages;
 use App\Models\User;
+use App\Services\SafetyService;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables;
@@ -140,6 +141,21 @@ class UserResource extends Resource
                     ->color(fn (User $record): string => $record->is_premium ? 'gray' : 'warning')
                     ->requiresConfirmation()
                     ->action(fn (User $record) => $record->update(['is_premium' => !$record->is_premium])),
+
+                // Segunda excepción al "solo lectura" de este recurso (ver
+                // comentario en form() arriba) — reversa un ban aplicado
+                // desde ReportResource\Pages\ViewReport (acción `banUser`),
+                // por si una apelación a support@prixma.site resulta
+                // legítima. Mismo patrón que togglePremium: sin ->authorize()
+                // propia (visible/ejecutable para cualquier admin autenticado
+                // que ya llegó a este recurso).
+                Tables\Actions\Action::make('unban')
+                    ->label('Quitar ban')
+                    ->icon('heroicon-o-lock-open')
+                    ->color('success')
+                    ->requiresConfirmation()
+                    ->visible(fn (User $record): bool => $record->status === 'banned')
+                    ->action(fn (User $record) => app(SafetyService::class)->unbanUser($record)),
             ])
             ->defaultSort('created_at', 'desc')
             ->paginated([10, 25, 50]);

@@ -29,19 +29,34 @@ class PresenceService
      */
     public function isUserOnline(string $userId): bool
     {
+        return collect($this->onlineUserIds())->contains($userId);
+    }
+
+    /**
+     * IDs de todos los usuarios conectados ahora mismo al canal de
+     * presencia global. Usado por el dashboard de Filament para el conteo
+     * de "en línea ahora" — mismo fail-safe que `isUserOnline()`: cualquier
+     * error de red/API con Reverb se trata como "nadie en línea" en vez de
+     * romper la página que lo consulte.
+     *
+     * @return list<string>
+     */
+    public function onlineUserIds(): array
+    {
         try {
             $pusher = Broadcast::connection('reverb')->getPusher();
             $result = $pusher->getPresenceUsers(self::PRESENCE_CHANNEL);
 
             return collect($result->users ?? [])
-                ->contains(fn ($member) => (string) $member->id === $userId);
+                ->map(fn ($member) => (string) $member->id)
+                ->values()
+                ->all();
         } catch (Throwable $e) {
             Log::warning('PresenceService: no se pudo consultar el canal de presencia de Reverb.', [
-                'user_id' => $userId,
                 'error' => $e->getMessage(),
             ]);
 
-            return false;
+            return [];
         }
     }
 }

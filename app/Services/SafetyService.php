@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Exceptions\BusinessException;
+use App\Mail\UserBannedMail;
 use App\Models\Block;
 use App\Models\Conversation;
 use App\Models\GeographicBlock;
@@ -12,6 +13,7 @@ use App\Models\User;
 use App\Models\UserMatch;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 
 class SafetyService
 {
@@ -167,6 +169,55 @@ class SafetyService
         $report->update(['status' => 'resolved']);
 
         return $report->fresh();
+    }
+
+    /**
+     * Sanción real sobre el usuario reportado — decisión confirmada con el
+     * humano 2026-08-03, ver features/safety/specs/plan.md → "Banear desde
+     * un reporte". A diferencia de `markReportAsResolved()` (que no aplica
+     * ninguna sanción), esto sí actúa sobre la cuenta:
+     * 1. `users.status = 'banned'` — ya bloqueaba el login (`AuthService`),
+     *    pero no invalidaba una sesión ya activa; se revocan también todos
+     *    sus tokens de Sanctum para que el bloqueo sea inmediato, no solo en
+     *    el siguiente intento de login.
+     * 2. El reporte que originó el ban se marca `resolved` — banear es en sí
+     *    la resolución más fuerte posible, no tiene sentido dejarlo abierto.
+     * 3. Correo al usuario (fuera de la transacción, best-effort — mismo
+     *    criterio que las notificaciones de Matching/Chat: un fallo en el
+     *    envío nunca debe revertir un ban ya aplicado).
+     *
+     * `$reasonLabel` ya viene resuelto por el llamador (`ReportResource::
+     * reasonLabels()`) — el Service no depende de una clase de Filament
+     * (capa de presentación).
+     */
+    public function banReportedUser(Report $report, string $reasonLabel): Report
+    {
+        $report = DB::transaction(function () use ($report) {
+            $user = $report->reported;
+            $user->update(['status' => 'banned']);
+            $user->tokens()->delete();
+
+            $report->update(['status' => 'resolved']);
+
+            return $report->fresh();
+        });
+
+        Mail::to($report->reported->email)->queue(new UserBannedMail($report->reported, $reasonLabel));
+
+        return $report;
+    }
+
+    /**
+     * Revierte un ban (apelación aceptada vía support@prixma.site — no hay
+     * flujo automatizado de apelación, es un cambio manual del staff).
+     * No reenvía ningún correo ni reactiva tokens viejos (ya fueron
+     * revocados, el usuario simplemente vuelve a poder iniciar sesión).
+     */
+    public function unbanUser(User $user): User
+    {
+        $user->update(['status' => 'active']);
+
+        return $user->fresh();
     }
 
     /**
