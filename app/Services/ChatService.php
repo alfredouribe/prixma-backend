@@ -13,6 +13,8 @@ use Illuminate\Support\Facades\DB;
 
 class ChatService
 {
+    public function __construct(private readonly NotificationService $notifications) {}
+
     /**
      * Relaciones necesarias para pintar `ConversationResource` (perfil
      * básico del otro usuario + último mensaje) sin N+1.
@@ -104,7 +106,7 @@ class ChatService
         $this->assertParticipant($conversation, $user);
         $this->assertCanSend($user, $conversation);
 
-        return DB::transaction(function () use ($user, $conversation, $content) {
+        $message = DB::transaction(function () use ($user, $conversation, $content) {
             $message = Message::create([
                 'conversation_id' => $conversation->id,
                 'sender_id' => $user->id,
@@ -117,6 +119,23 @@ class ChatService
 
             return $message;
         });
+
+        // Fuera de la transacción — mismo criterio que
+        // MatchingService::recordSwipe(): un fallo best-effort en el envío
+        // de la notificación nunca debe revertir un mensaje ya confirmado.
+        // NotificationService::sendMessageNotification() ya decide
+        // internamente si el receptor está en línea (PresenceService) y no
+        // hace nada en ese caso.
+        $recipientId = $conversation->user_id_1 === $user->id
+            ? $conversation->user_id_2
+            : $conversation->user_id_1;
+        $recipient = User::find($recipientId);
+
+        if ($recipient) {
+            $this->notifications->sendMessageNotification($recipient, $user, $message);
+        }
+
+        return $message;
     }
 
     public function markAsRead(User $user, string $conversationId): int
@@ -134,6 +153,12 @@ class ChatService
      * Envía la primera solicitud de mensaje a un usuario sin conversación
      * previa. Falla si ya existe una conversación (de cualquier type/status)
      * entre ambos — domain.md/UNIQUE(user_id_1, user_id_2).
+     *
+     * No dispara `sendMessageNotification` a propósito — el flujo de
+     * Solicitudes está construido pero deliberadamente sin exponer en la UI
+     * (ver CLAUDE.md → fila Chat, "corrección de alcance del humano: chat
+     * queda match-only por ahora"). Si se reactiva, agregar la notificación
+     * aquí igual que en `sendMessage()`.
      */
     public function sendRequest(User $user, string $receiverId, string $content): Conversation
     {

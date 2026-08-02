@@ -88,6 +88,38 @@ it('un usuario que no participa en la conversación recibe 403 al intentar autor
         ->assertStatus(403);
 });
 
+// ---------------------------------------------------------------------------
+// Canal App.Models.User.{id} — usado por el toast in-app global de mensaje
+// nuevo (ver App\Events\MessageSent). Bug de seguridad real corregido
+// 2026-08-02: la regla comparaba `(int) $user->id === (int) $id`, y como
+// los IDs son UUID (no enteros), ambos casts daban `0` — la regla siempre
+// era `true` sin importar el usuario.
+// ---------------------------------------------------------------------------
+
+it('un usuario puede autorizar su propio canal privado', function () {
+    ['user' => $user, 'token' => $token] = createBroadcastAuthUser();
+
+    $this->withToken($token)
+        ->postJson('/api/broadcasting/auth', [
+            'channel_name' => "private-App.Models.User.{$user->id}",
+            'socket_id' => '123.456',
+        ])
+        ->assertStatus(200)
+        ->assertJsonStructure(['auth']);
+});
+
+it('un usuario NO puede autorizar el canal privado de otro usuario', function () {
+    ['user' => $user, 'token' => $token] = createBroadcastAuthUser();
+    ['user' => $otherUser] = createBroadcastAuthUser();
+
+    $this->withToken($token)
+        ->postJson('/api/broadcasting/auth', [
+            'channel_name' => "private-App.Models.User.{$otherUser->id}",
+            'socket_id' => '123.456',
+        ])
+        ->assertStatus(403);
+});
+
 it('requiere autenticación para autorizar cualquier canal', function () {
     ['user' => $participantOne] = createBroadcastAuthUser();
     ['user' => $participantTwo] = createBroadcastAuthUser();

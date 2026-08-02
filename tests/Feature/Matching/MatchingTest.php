@@ -1,5 +1,7 @@
 <?php
 
+use App\Jobs\SendMatchNotification;
+use App\Jobs\SendSuperLikeNotification;
 use App\Models\Conversation;
 use App\Models\Interest;
 use App\Models\Profile;
@@ -11,6 +13,7 @@ use Database\Seeders\GenderIdentitySeeder;
 use Database\Seeders\InterestSeeder;
 use Database\Seeders\OrientationSeeder;
 use Database\Seeders\PronounSeeder;
+use Illuminate\Support\Facades\Queue;
 
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 
@@ -439,6 +442,69 @@ describe('swipe', function () {
             'status' => 'active',
             'match_id' => $matchId,
         ]);
+    });
+
+    it('despacha SendMatchNotification al hacer match', function () {
+        Queue::fake();
+        ['user' => $target] = createUserWithProfile();
+
+        Swipe::create([
+            'swiper_id' => $target->id,
+            'swiped_id' => $this->user->id,
+            'direction' => 'like',
+        ]);
+
+        $this->withToken($this->token)
+            ->postJson('/api/matching/swipe', [
+                'swiped_id' => $target->id,
+                'direction' => 'like',
+            ])
+            ->assertStatus(200);
+
+        Queue::assertPushed(SendMatchNotification::class);
+    });
+
+    it('no despacha SendMatchNotification si el swipe no produjo match', function () {
+        Queue::fake();
+        ['user' => $target] = createUserWithProfile();
+
+        $this->withToken($this->token)
+            ->postJson('/api/matching/swipe', [
+                'swiped_id' => $target->id,
+                'direction' => 'like',
+            ])
+            ->assertStatus(200)
+            ->assertJsonPath('data.matched', false);
+
+        Queue::assertNotPushed(SendMatchNotification::class);
+    });
+
+    it('despacha SendSuperLikeNotification cuando direction es super_like', function () {
+        Queue::fake();
+        ['user' => $target] = createUserWithProfile();
+
+        $this->withToken($this->token)
+            ->postJson('/api/matching/swipe', [
+                'swiped_id' => $target->id,
+                'direction' => 'super_like',
+            ])
+            ->assertStatus(200);
+
+        Queue::assertPushed(SendSuperLikeNotification::class);
+    });
+
+    it('no despacha SendSuperLikeNotification con un like normal', function () {
+        Queue::fake();
+        ['user' => $target] = createUserWithProfile();
+
+        $this->withToken($this->token)
+            ->postJson('/api/matching/swipe', [
+                'swiped_id' => $target->id,
+                'direction' => 'like',
+            ])
+            ->assertStatus(200);
+
+        Queue::assertNotPushed(SendSuperLikeNotification::class);
     });
 
 });

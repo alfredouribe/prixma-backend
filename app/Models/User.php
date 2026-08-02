@@ -121,4 +121,24 @@ class User extends Authenticatable
     {
         return Block::where('blocked_id', $this->id)->pluck('blocker_id');
     }
+
+    /**
+     * Sobrescribe deliberadamente el método `notifications()` que trae el
+     * trait `Notifiable` (que apunta a la tabla polimórfica nativa de
+     * Laravel — `notifiable_type`/`notifiable_id` — un esquema distinto al
+     * de nuestro `App\Models\Notification`, ver domain.md → Notification).
+     * Un método definido directamente en la clase tiene prioridad sobre el
+     * mismo método heredado de un trait, así que esto es seguro: `notify()`
+     * (el que sí usamos para disparar el envío) no depende de esta
+     * relación. Ver features/notifications/specs/plan.md.
+     */
+    public function notifications()
+    {
+        return $this->hasMany(Notification::class);
+    }
+
+    public function deviceTokens()
+    {
+        return $this->hasMany(DeviceToken::class);
+    }
 }

@@ -15,6 +15,8 @@ use Illuminate\Support\Facades\DB;
 
 class MatchingService
 {
+    public function __construct(private readonly NotificationService $notifications) {}
+
     public function getExploreQueue(User $user, int $limit = 25): Collection
     {
         if ($user->profile->verification_status !== 'verified') {
@@ -124,7 +126,7 @@ class MatchingService
             throw new AuthorizationException('Solo los perfiles verificados pueden explorar y dar like.');
         }
 
-        return DB::transaction(function () use ($user, $swipedId, $direction) {
+        $result = DB::transaction(function () use ($user, $swipedId, $direction) {
             $swipe = Swipe::create([
                 'swiper_id' => $user->id,
                 'swiped_id' => $swipedId,
@@ -155,7 +157,7 @@ class MatchingService
                 'user_id_2' => $id2,
             ]);
 
-            Conversation::create([
+            $conversation = Conversation::create([
                 'user_id_1' => $id1,
                 'user_id_2' => $id2,
                 'type' => 'match',
@@ -163,8 +165,33 @@ class MatchingService
                 'match_id' => $match->id,
             ]);
 
-            return ['swiped' => true, 'matched' => true, 'match_id' => $match->id];
+            return [
+                'swiped' => true,
+                'matched' => true,
+                'match_id' => $match->id,
+                'conversation_id' => $conversation->id,
+            ];
         });
+
+        // Notificaciones fuera de la transacción — un fallo en el envío
+        // (best-effort, no debería lanzar, pero por disciplina) nunca debe
+        // revertir un swipe/match ya confirmado en BD. Un solo swipe puede
+        // disparar las dos a la vez (super_like que además genera match) —
+        // domain.md → Swipe: "super_like notifica al swiped aunque no haya
+        // match", independiente de la notificación de match.
+        $notifyUser = ($direction === 'super_like' || ($result['matched'] ?? false))
+            ? User::find($swipedId)
+            : null;
+
+        if ($direction === 'super_like' && $notifyUser) {
+            $this->notifications->sendSuperLikeNotification($notifyUser);
+        }
+
+        if (($result['matched'] ?? false) && $notifyUser) {
+            $this->notifications->sendMatchNotification($user, $notifyUser, $result['conversation_id']);
+        }
+
+        return $result;
     }
 
     public function calculateScore(

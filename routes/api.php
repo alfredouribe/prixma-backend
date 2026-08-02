@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\Chat\ConversationController;
 use App\Http\Controllers\Api\Chat\MessageController;
 use App\Http\Controllers\Api\Events\EventController;
 use App\Http\Controllers\Api\Matching\MatchingController;
+use App\Http\Controllers\Api\Notifications\NotificationController;
 use App\Http\Controllers\Api\Onboarding\OnboardingController;
 use App\Http\Controllers\Api\Profile\ProfileController;
 use App\Http\Controllers\Api\Safety\SafetyController;
@@ -111,5 +112,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/geo-blocks', [SafetyController::class, 'indexGeoBlocks']);
         Route::post('/geo-blocks', [SafetyController::class, 'storeGeoBlock']);
         Route::delete('/geo-blocks/{uuid}', [SafetyController::class, 'destroyGeoBlock']);
+    });
+
+    Route::prefix('notifications')->group(function () {
+        Route::get('/', [NotificationController::class, 'index']);
+        Route::patch('/read-all', [NotificationController::class, 'readAll']);
+        Route::patch('/{uuid}/read', [NotificationController::class, 'markRead']);
+        Route::get('/unread-count', [NotificationController::class, 'unreadCount']);
+        Route::post('/device-token', [NotificationController::class, 'registerToken']);
+        Route::delete('/device-token', [NotificationController::class, 'removeToken']);
     });
 });

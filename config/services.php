@@ -35,4 +35,20 @@ return [
         ],
     ],
 
+    /*
+    | FCM (Firebase Cloud Messaging) — ver features/notifications/specs/plan.md
+    | → "FCM sin credenciales". `FcmService` solo envía si
+    | `credentials_path` resuelve a un archivo real; mientras tanto es un
+    | no-op registrado en logs. `FCM_CREDENTIALS_PATH` en .env es solo la
+    | ruta RELATIVA dentro del disco privado (storage/app/private/...) —
+    | nunca una ruta absoluta ni un archivo fuera de ese disco, que está
+    | completamente excluido de git (mismo disco que usa Verification para
+    | los documentos de identidad).
+    */
+    'fcm' => [
+        'credentials_path' => env('FCM_CREDENTIALS_PATH')
+            ? storage_path('app/private/'.env('FCM_CREDENTIALS_PATH'))
+            : null,
+    ],
+
 ];

@@ -1,11 +1,14 @@
 <?php
 
 use App\Events\MessageSent;
+use App\Jobs\SendMessageNotification;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Models\Profile;
 use App\Models\User;
+use App\Services\PresenceService;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Queue;
 
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 
@@ -274,6 +277,51 @@ describe('POST /api/chat/conversations/{id}/messages', function () {
         Event::assertDispatched(MessageSent::class, function ($event) use ($conversation) {
             return (string) $event->conversation->id === (string) $conversation->id;
         });
+    });
+
+    it('despacha SendMessageNotification al receptor cuando está offline', function () {
+        Queue::fake();
+        Event::fake([MessageSent::class]);
+        ['user' => $otherUser] = createChatUser();
+        [$id1, $id2] = sortedIds($this->user->id, $otherUser->id);
+        $conversation = Conversation::create([
+            'user_id_1' => $id1,
+            'user_id_2' => $id2,
+            'type' => 'match',
+            'status' => 'active',
+        ]);
+
+        // Sin ->with() — comparar contra el objeto lazy UUID de Eloquent es
+        // frágil entre instancias distintas de User (ver nota en
+        // NotificationServiceTest); solo hay una llamada relevante aquí.
+        $this->mock(PresenceService::class)->shouldReceive('isUserOnline')->once()->andReturn(false);
+
+        $this->withToken($this->token)
+            ->postJson("/api/chat/conversations/{$conversation->id}/messages", ['content' => 'Hola!'])
+            ->assertStatus(201);
+
+        Queue::assertPushed(SendMessageNotification::class);
+    });
+
+    it('NO despacha SendMessageNotification cuando el receptor está en línea', function () {
+        Queue::fake();
+        Event::fake([MessageSent::class]);
+        ['user' => $otherUser] = createChatUser();
+        [$id1, $id2] = sortedIds($this->user->id, $otherUser->id);
+        $conversation = Conversation::create([
+            'user_id_1' => $id1,
+            'user_id_2' => $id2,
+            'type' => 'match',
+            'status' => 'active',
+        ]);
+
+        $this->mock(PresenceService::class)->shouldReceive('isUserOnline')->once()->andReturn(true);
+
+        $this->withToken($this->token)
+            ->postJson("/api/chat/conversations/{$conversation->id}/messages", ['content' => 'Hola!'])
+            ->assertStatus(201);
+
+        Queue::assertNotPushed(SendMessageNotification::class);
     });
 
     it('solo un participante puede enviar mensajes', function () {
