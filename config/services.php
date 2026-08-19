@@ -51,4 +51,17 @@ return [
             : null,
     ],
 
+    /*
+    | RevenueCat — ver features/subscriptions/specs/plan.md → "Webhook de
+    | RevenueCat". Secreto compartido que RevenueCat envía como
+    | `Authorization: Bearer {secret}` al llamar
+    | POST /api/webhooks/revenuecat. Placeholder vacío hasta que exista la
+    | cuenta real de RevenueCat (ver spec.md → "Bloqueos externos
+    | actuales") — con el valor vacío, `VerifyRevenueCatWebhookSecret`
+    | rechaza cualquier request, nunca deja el webhook abierto sin secreto.
+    */
+    'revenuecat' => [
+        'webhook_secret' => env('REVENUECAT_WEBHOOK_SECRET'),
+    ],
+
 ];

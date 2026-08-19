@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Exceptions\AuthorizationException;
+use App\Exceptions\BusinessException;
 use App\Exceptions\LikeLimitExceededException;
 use App\Models\Conversation;
 use App\Models\PlatformSetting;
@@ -138,18 +139,34 @@ class MatchingService
         // día". `dislike` nunca cuenta ni se limita. Se valida aquí (server
         // side) porque, a diferencia de la frecuencia de ads, sí es una
         // regla de negocio con valor económico real.
-        if (!$user->is_premium && in_array($direction, ['like', 'super_like'], true)) {
+        // Saldo de super likes extra (features/premium/specs/spec.md →
+        // "Super likes extra") — solo aplica a la dirección `super_like`,
+        // nunca a `like`. La decisión se toma aquí (lectura) pero el
+        // decremento ocurre dentro de la transacción de abajo, junto con la
+        // creación del Swipe, para que el crédito nunca se pierda si la
+        // creación fallara por cualquier razón.
+        $usesExtraSuperLike = false;
+
+        if (!$user->hasPremiumAccess() && in_array($direction, ['like', 'super_like'], true)) {
             $todayLikes = Swipe::where('swiper_id', $user->id)
                 ->whereIn('direction', ['like', 'super_like'])
                 ->whereDate('created_at', now()->toDateString())
                 ->count();
 
             if ($todayLikes >= PlatformSetting::current()->free_likes_per_day) {
-                throw new LikeLimitExceededException('Alcanzaste tu límite diario de likes. Actualiza a Prixma+ para dar likes ilimitados.');
+                if ($direction === 'super_like' && $user->extra_super_likes > 0) {
+                    $usesExtraSuperLike = true;
+                } else {
+                    throw new LikeLimitExceededException('Alcanzaste tu límite diario de likes. Actualiza a Prixma+ para dar likes ilimitados.');
+                }
             }
         }
 
-        $result = DB::transaction(function () use ($user, $swipedId, $direction) {
+        $result = DB::transaction(function () use ($user, $swipedId, $direction, $usesExtraSuperLike) {
+            if ($usesExtraSuperLike) {
+                $user->decrement('extra_super_likes');
+            }
+
             $swipe = Swipe::create([
                 'swiper_id' => $user->id,
                 'swiped_id' => $swipedId,
@@ -217,6 +234,88 @@ class MatchingService
         return $result;
     }
 
+    /**
+     * Deshace el último swipe del usuario, consumiendo 1 rewind_credit. Ver
+     * features/premium/specs/spec.md/plan.md → "Deshacer swipe / rewind".
+     * No hay excepción dedicada (a diferencia de LikeLimitExceededException
+     * → 429) — los 3 casos de rechazo son igual de "esperados" y no
+     * necesitan una rama de UI especial, BusinessException genérica → 400
+     * basta.
+     */
+    public function rewindLastSwipe(User $user): array
+    {
+        if ($user->rewind_credits <= 0) {
+            throw new BusinessException('No te quedan usos de deshacer swipe.');
+        }
+
+        $lastSwipe = Swipe::where('swiper_id', $user->id)
+            ->orderByDesc('created_at')
+            ->first();
+
+        if (!$lastSwipe) {
+            throw new BusinessException('No hay ningún swipe para deshacer.');
+        }
+
+        // Chequeado en ambas direcciones — el orden de user_id_1/user_id_2 en
+        // UserMatch no está garantizado (ver recordSwipe(): se ordena por
+        // comparación de UUID, no por quién swipeó primero).
+        $alreadyMatched = UserMatch::where(function ($q) use ($user, $lastSwipe) {
+                $q->where('user_id_1', $user->id)->where('user_id_2', $lastSwipe->swiped_id);
+            })
+            ->orWhere(function ($q) use ($user, $lastSwipe) {
+                $q->where('user_id_1', $lastSwipe->swiped_id)->where('user_id_2', $user->id);
+            })
+            ->exists();
+
+        if ($alreadyMatched) {
+            throw new BusinessException('No puedes deshacer un swipe que ya generó un match.');
+        }
+
+        $swipedId = $lastSwipe->swiped_id;
+
+        DB::transaction(function () use ($user, $lastSwipe) {
+            $lastSwipe->delete();
+            $user->decrement('rewind_credits');
+        });
+
+        return ['swiped_id' => $swipedId, 'rewind_credits' => $user->fresh()->rewind_credits];
+    }
+
+    /**
+     * Lista de personas que le dieron like/super_like al usuario, sin
+     * necesidad de match previo. Ver features/premium/specs/spec.md/plan.md
+     * → "Ver quién te dio like".
+     */
+    public function getLikers(User $user): Collection
+    {
+        if (!$user->canSeeLikers()) {
+            throw new AuthorizationException('Necesitas Prixma+ para ver quién te dio like.');
+        }
+
+        $alreadySwipedIds = Swipe::where('swiper_id', $user->id)->pluck('swiped_id');
+
+        $likerIdsInOrder = Swipe::where('swiped_id', $user->id)
+            ->whereIn('direction', ['like', 'super_like'])
+            ->whereNotIn('swiper_id', $alreadySwipedIds)
+            ->orderByDesc('created_at')
+            ->pluck('swiper_id')
+            ->unique()
+            ->values();
+
+        $candidates = User::query()
+            ->whereIn('id', $likerIdsInOrder)
+            ->whereNotIn('id', $user->blockedUserIds())
+            ->whereNotIn('id', $user->blockedByUserIds())
+            ->where('status', 'active')
+            ->with(['profile.photos', 'profile.genderIdentities', 'profile.orientations', 'profile.pronouns', 'profile.interests'])
+            ->get()
+            ->keyBy('id');
+
+        // whereIn no garantiza orden — se reconstruye manualmente para
+        // preservar "más reciente primero".
+        return $likerIdsInOrder->map(fn ($id) => $candidates->get($id))->filter()->values();
+    }
+
     public function calculateScore(
         Profile $viewer,
         Profile $target,
@@ -249,6 +348,18 @@ class MatchingService
         // Target already super-liked the viewer
         if ($targetSuperLikedViewer) {
             $score += 15;
+        }
+
+        // Boost de perfil (features/premium/specs/spec.md → "Boost de
+        // perfil") — bono dominante, muy por encima de cualquier
+        // combinación posible del resto de criterios (máximo real: ~45 sin
+        // boost, penalización de distancia hasta -50), garantiza que un
+        // perfil boosteado quede primero entre los candidatos que ya
+        // pasaron los filtros. Se agrega ANTES de la exclusión por
+        // distancia de abajo a propósito — el boost no bypasea ese filtro,
+        // solo prioriza entre quienes ya calificaron.
+        if ($target->boosted_until !== null && $target->boosted_until->isFuture()) {
+            $score += 10000;
         }
 
         // Distance penalty (only if both have location)

@@ -32,6 +32,7 @@ class Profile extends Model
         'latitude',
         'longitude',
         'verification_status',
+        'boosted_until',
     ];
 
     protected function casts(): array
@@ -40,6 +41,7 @@ class Profile extends Model
             'video_processed'      => 'boolean',
             'onboarding_step'      => 'integer',
             'onboarding_completed' => 'boolean',
+            'boosted_until'        => 'datetime',
         ];
     }
 

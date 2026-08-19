@@ -3,9 +3,13 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\UserResource\Pages;
+use App\Models\Package;
 use App\Models\User;
+use App\Services\PackageService;
 use App\Services\SafetyService;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Form;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Filters\SelectFilter;
@@ -156,6 +160,38 @@ class UserResource extends Resource
                     ->requiresConfirmation()
                     ->visible(fn (User $record): bool => $record->status === 'banned')
                     ->action(fn (User $record) => app(SafetyService::class)->unbanUser($record)),
+
+                // Tercera excepción al "solo lectura" de este recurso (ver
+                // comentario en form() arriba) — features/premium/specs/
+                // "Catálogo de paquetes" (2026-08-11): otorgar manualmente un
+                // paquete del catálogo a un usuario específico, mientras no
+                // exista Google Play Billing/Apple IAP. Solo paquetes
+                // `is_active` aparecen en el select. Delega por completo en
+                // PackageService::grantToUser() — la Resource solo resuelve
+                // el Package elegido y llama al Service, ninguna lógica de
+                // negocio vive aquí (constitution.md → "No business logic in
+                // the panel").
+                Tables\Actions\Action::make('grantPackage')
+                    ->label('Otorgar paquete')
+                    ->icon('heroicon-o-gift')
+                    ->color('primary')
+                    ->form([
+                        Select::make('package_id')
+                            ->label('Paquete')
+                            ->options(fn (): array => Package::where('is_active', true)->pluck('name', 'id')->all())
+                            ->required()
+                            ->searchable(),
+                    ])
+                    ->action(function (User $record, array $data): void {
+                        $package = Package::findOrFail($data['package_id']);
+
+                        app(PackageService::class)->grantToUser($record, $package, auth('admin')->user());
+
+                        Notification::make()
+                            ->title('Paquete otorgado')
+                            ->success()
+                            ->send();
+                    }),
             ])
             ->defaultSort('created_at', 'desc')
             ->paginated([10, 25, 50]);

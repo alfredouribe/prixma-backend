@@ -182,6 +182,35 @@ describe('explore', function () {
         expect($ids)->not->toContain($this->user->id);
     });
 
+    it('un candidato con boosted_until vigente aparece primero en la cola real, aunque tenga peor score en todo lo demás', function () {
+        // El boosteado no comparte intención con el viewer (community vs.
+        // friendship del viewer, así que no suma el bono de +20 por
+        // coincidencia) y no está verificado — sin el bono de boost,
+        // quedaría por debajo del candidato "normal" de abajo. `intention`
+        // no puede ser null: getExploreQueue() excluye del query a quien no
+        // tenga una de las intenciones compartidas del viewer (aquí
+        // friendship/community/mentorship), antes de llegar al scoring.
+        ['profile' => $boostedProfile] = createUserWithProfile([
+            'display_name' => 'Perfil Boosteado',
+            'intention' => 'community',
+            'verification_status' => 'unverified',
+        ]);
+        $boostedProfile->update(['boosted_until' => now()->addMinutes(30)]);
+
+        createUserWithProfile([
+            'display_name' => 'Perfil Normal Mejor Score',
+            'intention' => 'friendship', // coincide con el viewer, +20
+            'verification_status' => 'verified', // +5
+        ]);
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/matching/explore')
+            ->assertStatus(200);
+
+        $names = collect($response->json('data'))->pluck('display_name');
+        expect($names->first())->toBe('Perfil Boosteado');
+    });
+
     it('excluye usuarios ya swipeados', function () {
         ['user' => $swiped] = createUserWithProfile();
 
@@ -579,6 +608,31 @@ describe('límite de likes/día', function () {
         }
     });
 
+    it('un usuario con premium_until futuro (sin is_premium) también puede dar likes ilimitados', function () {
+        PlatformSetting::current()->update(['free_likes_per_day' => 1]);
+        $this->user->update(['is_premium' => false, 'premium_until' => now()->addDays(3)]);
+
+        for ($i = 0; $i < 3; $i++) {
+            ['user' => $target] = createUserWithProfile();
+            $this->withToken($this->token)
+                ->postJson('/api/matching/swipe', ['swiped_id' => $target->id, 'direction' => 'like'])
+                ->assertStatus(200);
+        }
+    });
+
+    it('un usuario con Subscription activa (sin is_premium, sin premium_until) también puede dar likes ilimitados', function () {
+        PlatformSetting::current()->update(['free_likes_per_day' => 1]);
+        $this->user->update(['is_premium' => false, 'premium_until' => null]);
+        \App\Models\Subscription::factory()->for($this->user)->create(['status' => 'active']);
+
+        for ($i = 0; $i < 3; $i++) {
+            ['user' => $target] = createUserWithProfile();
+            $this->withToken($this->token)
+                ->postJson('/api/matching/swipe', ['swiped_id' => $target->id, 'direction' => 'like'])
+                ->assertStatus(200);
+        }
+    });
+
     it('dislike nunca cuenta para el límite', function () {
         PlatformSetting::current()->update(['free_likes_per_day' => 1]);
 
@@ -636,6 +690,345 @@ describe('límite de likes/día', function () {
 });
 
 // ---------------------------------------------------------------------------
+// Super likes extra (features/premium/specs/spec.md → "Super likes extra")
+// ---------------------------------------------------------------------------
+
+describe('super likes extra', function () {
+
+    it('un super_like más allá del límite diario se permite y consume 1 crédito si hay saldo', function () {
+        PlatformSetting::current()->update(['free_likes_per_day' => 1]);
+        $this->user->update(['extra_super_likes' => 2]);
+
+        ['user' => $firstTarget] = createUserWithProfile();
+        $this->withToken($this->token)
+            ->postJson('/api/matching/swipe', ['swiped_id' => $firstTarget->id, 'direction' => 'like'])
+            ->assertStatus(200);
+
+        ['user' => $secondTarget] = createUserWithProfile();
+        $this->withToken($this->token)
+            ->postJson('/api/matching/swipe', ['swiped_id' => $secondTarget->id, 'direction' => 'super_like'])
+            ->assertStatus(200);
+
+        expect($this->user->fresh()->extra_super_likes)->toBe(1);
+        $this->assertDatabaseHas('swipes', [
+            'swiper_id' => $this->user->id,
+            'swiped_id' => $secondTarget->id,
+            'direction' => 'super_like',
+        ]);
+    });
+
+    it('un like normal (no super_like) más allá del límite NO consume el saldo de super likes extra', function () {
+        PlatformSetting::current()->update(['free_likes_per_day' => 1]);
+        $this->user->update(['extra_super_likes' => 2]);
+
+        ['user' => $firstTarget] = createUserWithProfile();
+        $this->withToken($this->token)
+            ->postJson('/api/matching/swipe', ['swiped_id' => $firstTarget->id, 'direction' => 'like'])
+            ->assertStatus(200);
+
+        ['user' => $secondTarget] = createUserWithProfile();
+        $this->withToken($this->token)
+            ->postJson('/api/matching/swipe', ['swiped_id' => $secondTarget->id, 'direction' => 'like'])
+            ->assertStatus(429);
+
+        expect($this->user->fresh()->extra_super_likes)->toBe(2);
+    });
+
+    it('sin saldo de super likes extra, el super_like más allá del límite sigue rechazado con 429', function () {
+        PlatformSetting::current()->update(['free_likes_per_day' => 1]);
+        $this->user->update(['extra_super_likes' => 0]);
+
+        ['user' => $firstTarget] = createUserWithProfile();
+        $this->withToken($this->token)
+            ->postJson('/api/matching/swipe', ['swiped_id' => $firstTarget->id, 'direction' => 'like'])
+            ->assertStatus(200);
+
+        ['user' => $secondTarget] = createUserWithProfile();
+        $this->withToken($this->token)
+            ->postJson('/api/matching/swipe', ['swiped_id' => $secondTarget->id, 'direction' => 'super_like'])
+            ->assertStatus(429);
+
+        $this->assertDatabaseMissing('swipes', [
+            'swiper_id' => $this->user->id,
+            'swiped_id' => $secondTarget->id,
+        ]);
+    });
+
+    it('un usuario premium nunca consume el saldo de super likes extra', function () {
+        PlatformSetting::current()->update(['free_likes_per_day' => 1]);
+        $this->user->update(['is_premium' => true, 'extra_super_likes' => 2]);
+
+        for ($i = 0; $i < 3; $i++) {
+            ['user' => $target] = createUserWithProfile();
+            $this->withToken($this->token)
+                ->postJson('/api/matching/swipe', ['swiped_id' => $target->id, 'direction' => 'super_like'])
+                ->assertStatus(200);
+        }
+
+        expect($this->user->fresh()->extra_super_likes)->toBe(2);
+    });
+
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/matching/rewind (features/premium/specs/spec.md → "Deshacer swipe / rewind")
+// ---------------------------------------------------------------------------
+
+describe('rewind', function () {
+
+    it('deshace exitosamente el último swipe: borra el Swipe y resta 1 crédito', function () {
+        $this->user->update(['rewind_credits' => 3]);
+        ['user' => $target] = createUserWithProfile();
+
+        Swipe::create([
+            'swiper_id' => $this->user->id,
+            'swiped_id' => $target->id,
+            'direction' => 'like',
+        ]);
+
+        $this->withToken($this->token)
+            ->postJson('/api/matching/rewind')
+            ->assertStatus(200)
+            ->assertJsonPath('data.swiped_id', (string) $target->id)
+            ->assertJsonPath('data.rewind_credits', 2);
+
+        $this->assertDatabaseMissing('swipes', [
+            'swiper_id' => $this->user->id,
+            'swiped_id' => $target->id,
+        ]);
+        expect($this->user->fresh()->rewind_credits)->toBe(2);
+    });
+
+    it('rechaza con 400 cuando el usuario no tiene créditos de rewind', function () {
+        ['user' => $target] = createUserWithProfile();
+
+        Swipe::create([
+            'swiper_id' => $this->user->id,
+            'swiped_id' => $target->id,
+            'direction' => 'like',
+        ]);
+
+        // rewind_credits es 0 por default (no se asignó explícitamente).
+        $this->withToken($this->token)
+            ->postJson('/api/matching/rewind')
+            ->assertStatus(400);
+
+        $this->assertDatabaseHas('swipes', [
+            'swiper_id' => $this->user->id,
+            'swiped_id' => $target->id,
+        ]);
+    });
+
+    it('rechaza con 400 cuando no hay ningún swipe para deshacer', function () {
+        $this->user->update(['rewind_credits' => 1]);
+
+        $this->withToken($this->token)
+            ->postJson('/api/matching/rewind')
+            ->assertStatus(400);
+
+        expect($this->user->fresh()->rewind_credits)->toBe(1);
+    });
+
+    it('rechaza con 400 cuando el último swipe ya generó un match, sin borrar nada', function () {
+        $this->user->update(['rewind_credits' => 1]);
+        ['user' => $target] = createUserWithProfile();
+
+        Swipe::create([
+            'swiper_id' => $this->user->id,
+            'swiped_id' => $target->id,
+            'direction' => 'like',
+        ]);
+
+        [$id1, $id2] = $this->user->id < $target->id
+            ? [$this->user->id, $target->id]
+            : [$target->id, $this->user->id];
+
+        UserMatch::create(['user_id_1' => $id1, 'user_id_2' => $id2]);
+
+        $this->withToken($this->token)
+            ->postJson('/api/matching/rewind')
+            ->assertStatus(400);
+
+        $this->assertDatabaseHas('swipes', [
+            'swiper_id' => $this->user->id,
+            'swiped_id' => $target->id,
+        ]);
+        expect($this->user->fresh()->rewind_credits)->toBe(1);
+    });
+
+    it('solo deshace el último swipe — uno anterior se queda intacto', function () {
+        $this->user->update(['rewind_credits' => 1]);
+        ['user' => $olderTarget] = createUserWithProfile();
+        ['user' => $newerTarget] = createUserWithProfile();
+
+        $olderSwipe = Swipe::create([
+            'swiper_id' => $this->user->id,
+            'swiped_id' => $olderTarget->id,
+            'direction' => 'like',
+        ]);
+        $olderSwipe->created_at = now()->subMinutes(10);
+        $olderSwipe->save();
+
+        Swipe::create([
+            'swiper_id' => $this->user->id,
+            'swiped_id' => $newerTarget->id,
+            'direction' => 'dislike',
+        ]);
+
+        $this->withToken($this->token)
+            ->postJson('/api/matching/rewind')
+            ->assertStatus(200)
+            ->assertJsonPath('data.swiped_id', (string) $newerTarget->id);
+
+        $this->assertDatabaseMissing('swipes', [
+            'swiper_id' => $this->user->id,
+            'swiped_id' => $newerTarget->id,
+        ]);
+        $this->assertDatabaseHas('swipes', [
+            'swiper_id' => $this->user->id,
+            'swiped_id' => $olderTarget->id,
+        ]);
+    });
+
+    it('requiere autenticación', function () {
+        $this->postJson('/api/matching/rewind')->assertStatus(401);
+    });
+
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/matching/likers (features/premium/specs/spec.md → "Ver quién te
+// dio like")
+// ---------------------------------------------------------------------------
+
+describe('likers', function () {
+
+    it('retorna la lista de quienes dieron like/super_like, más reciente primero', function () {
+        $this->user->update(['is_premium' => true]);
+
+        ['user' => $oldestLiker] = createUserWithProfile(['display_name' => 'Liker Viejo']);
+        ['user' => $middleLiker] = createUserWithProfile(['display_name' => 'Liker Medio']);
+        ['user' => $newestLiker] = createUserWithProfile(['display_name' => 'Liker Nuevo']);
+
+        // Swipe::booted() fija created_at = now() en creating() sin importar
+        // lo que se pase a create() — se corrige después con una asignación
+        // directa (no pasa por $fillable, save() no vuelve a disparar el
+        // hook de creating), mismo patrón ya usado en la suite de rewind.
+        $oldest = Swipe::create(['swiper_id' => $oldestLiker->id, 'swiped_id' => $this->user->id, 'direction' => 'like']);
+        $oldest->created_at = now()->subMinutes(30);
+        $oldest->save();
+
+        $middle = Swipe::create(['swiper_id' => $middleLiker->id, 'swiped_id' => $this->user->id, 'direction' => 'super_like']);
+        $middle->created_at = now()->subMinutes(20);
+        $middle->save();
+
+        $newest = Swipe::create(['swiper_id' => $newestLiker->id, 'swiped_id' => $this->user->id, 'direction' => 'like']);
+        $newest->created_at = now()->subMinutes(10);
+        $newest->save();
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/matching/likers')
+            ->assertStatus(200);
+
+        $names = collect($response->json('data'))->pluck('display_name');
+        expect($names->all())->toBe(['Liker Nuevo', 'Liker Medio', 'Liker Viejo']);
+    });
+
+    it('excluye a quien el usuario ya swipeó, en cualquier dirección', function () {
+        $this->user->update(['is_premium' => true]);
+
+        ['user' => $likedAlready] = createUserWithProfile();
+        ['user' => $dislikedAlready] = createUserWithProfile();
+        ['user' => $superLikedAlready] = createUserWithProfile();
+        ['user' => $notYetSwiped] = createUserWithProfile();
+
+        foreach ([$likedAlready, $dislikedAlready, $superLikedAlready, $notYetSwiped] as $liker) {
+            Swipe::create(['swiper_id' => $liker->id, 'swiped_id' => $this->user->id, 'direction' => 'like']);
+        }
+
+        Swipe::create(['swiper_id' => $this->user->id, 'swiped_id' => $likedAlready->id, 'direction' => 'like']);
+        Swipe::create(['swiper_id' => $this->user->id, 'swiped_id' => $dislikedAlready->id, 'direction' => 'dislike']);
+        Swipe::create(['swiper_id' => $this->user->id, 'swiped_id' => $superLikedAlready->id, 'direction' => 'super_like']);
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/matching/likers')
+            ->assertStatus(200);
+
+        $ids = collect($response->json('data'))->pluck('id');
+        expect($ids)->not->toContain(
+            (string) $likedAlready->id,
+            (string) $dislikedAlready->id,
+            (string) $superLikedAlready->id
+        );
+        expect($ids)->toContain((string) $notYetSwiped->id);
+    });
+
+    it('excluye usuarios bloqueados en ambas direcciones', function () {
+        $this->user->update(['is_premium' => true]);
+
+        ['user' => $blockedByMe] = createUserWithProfile();
+        ['user' => $blockedMe] = createUserWithProfile();
+        ['user' => $visibleLiker] = createUserWithProfile();
+
+        foreach ([$blockedByMe, $blockedMe, $visibleLiker] as $liker) {
+            Swipe::create(['swiper_id' => $liker->id, 'swiped_id' => $this->user->id, 'direction' => 'like']);
+        }
+
+        \App\Models\Block::create(['blocker_id' => $this->user->id, 'blocked_id' => $blockedByMe->id]);
+        \App\Models\Block::create(['blocker_id' => $blockedMe->id, 'blocked_id' => $this->user->id]);
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/matching/likers')
+            ->assertStatus(200);
+
+        $ids = collect($response->json('data'))->pluck('id');
+        expect($ids)->not->toContain((string) $blockedByMe->id, (string) $blockedMe->id);
+        expect($ids)->toContain((string) $visibleLiker->id);
+    });
+
+    it('retorna 403 cuando el usuario no tiene acceso', function () {
+        $this->user->update(['is_premium' => false, 'premium_until' => null, 'see_likers_until' => null]);
+
+        $this->withToken($this->token)
+            ->getJson('/api/matching/likers')
+            ->assertStatus(403);
+    });
+
+    it('permite el acceso vía hasPremiumAccess() (is_premium=true)', function () {
+        $this->user->update(['is_premium' => true, 'see_likers_until' => null]);
+        ['user' => $liker] = createUserWithProfile();
+        Swipe::create(['swiper_id' => $liker->id, 'swiped_id' => $this->user->id, 'direction' => 'like']);
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/matching/likers')
+            ->assertStatus(200);
+
+        expect(collect($response->json('data'))->pluck('id'))->toContain((string) $liker->id);
+    });
+
+    it('permite el acceso vía see_likers_until vigente, sin is_premium y sin suscripción activa', function () {
+        $this->user->update([
+            'is_premium' => false,
+            'premium_until' => null,
+            'see_likers_until' => now()->addDays(3),
+        ]);
+        ['user' => $liker] = createUserWithProfile();
+        Swipe::create(['swiper_id' => $liker->id, 'swiped_id' => $this->user->id, 'direction' => 'like']);
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/matching/likers')
+            ->assertStatus(200);
+
+        expect(collect($response->json('data'))->pluck('id'))->toContain((string) $liker->id);
+    });
+
+    it('requiere autenticación', function () {
+        $this->getJson('/api/matching/likers')->assertStatus(401);
+    });
+
+});
+
+// ---------------------------------------------------------------------------
 // MatchingService::calculateScore
 // ---------------------------------------------------------------------------
 
@@ -676,6 +1069,39 @@ describe('calculateScore', function () {
         $score = $service->calculateScore($viewerProfile, $targetProfile, false, 50);
 
         expect($score)->toBeGreaterThanOrEqual(5);
+    });
+
+    it('un target con boosted_until vigente recibe un bono dominante por encima de cualquier otro criterio', function () {
+        $viewerProfile = $this->profile;
+        $viewerProfile->load('interests');
+
+        ['user' => $targetUser] = createUserWithProfile(['intention' => null, 'verification_status' => 'unverified']);
+        $targetProfile = $targetUser->profile()->first();
+        $targetProfile->update(['boosted_until' => now()->addMinutes(30)]);
+        $targetProfile->load('interests');
+
+        $service = app(MatchingService::class);
+        $score = $service->calculateScore($viewerProfile, $targetProfile, false, 50);
+
+        // Sin ningún otro criterio a favor, el bono de boost (+10000) debe
+        // dominar por completo — muy por encima del máximo real posible sin
+        // boost (intereses + intención + verificado + video + super_like).
+        expect($score)->toBeGreaterThanOrEqual(10000);
+    });
+
+    it('boosted_until vencido no otorga ningún bono', function () {
+        $viewerProfile = $this->profile;
+        $viewerProfile->load('interests');
+
+        ['user' => $targetUser] = createUserWithProfile(['intention' => null, 'verification_status' => 'unverified']);
+        $targetProfile = $targetUser->profile()->first();
+        $targetProfile->update(['boosted_until' => now()->subMinute()]);
+        $targetProfile->load('interests');
+
+        $service = app(MatchingService::class);
+        $score = $service->calculateScore($viewerProfile, $targetProfile, false, 50);
+
+        expect($score)->toBeLessThan(100);
     });
 
     it('suma puntos por super_like previo del target', function () {

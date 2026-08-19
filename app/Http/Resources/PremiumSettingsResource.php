@@ -17,11 +17,20 @@ class PremiumSettingsResource extends JsonResource
         $settings = PlatformSetting::current();
 
         return [
-            'is_premium' => (bool) $this->is_premium,
+            // Gate real, no la columna cruda — refleja tanto el toggle
+            // manual (`is_premium`) como Premium temporal otorgado por un
+            // Package (`premium_until`). Ver User::hasPremiumAccess() y
+            // features/premium/specs/plan.md → "Catálogo de paquetes".
+            'is_premium' => $this->resource->hasPremiumAccess(),
             'free_swipes_per_ad' => $settings->free_swipes_per_ad,
             'free_likes_per_day' => $settings->free_likes_per_day,
             'free_chat_minutes_before_ad' => $settings->free_chat_minutes_before_ad,
             'chat_ad_video_url' => $settings->chatAdVideoUrl(),
+            // Saldo de "deshacer swipe" — ver features/premium/specs/plan.md
+            // → "Deshacer swipe / rewind": se expone aquí en vez de un
+            // endpoint nuevo porque este endpoint ya se trae una vez por
+            // sesión, mismo punto donde ExploreScreen ya vive.
+            'rewind_credits' => $this->resource->rewind_credits,
         ];
     }
 }

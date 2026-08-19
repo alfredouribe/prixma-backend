@@ -55,6 +55,26 @@ it('is_premium es false para un usuario sin Prixma+', function () {
         ->assertJsonPath('data.is_premium', false);
 });
 
+it('is_premium refleja un premium_until activo aunque is_premium sea false', function () {
+    ['user' => $user, 'token' => $token] = createPremiumTestUser(isPremium: false);
+    $user->update(['premium_until' => now()->addDays(3)]);
+
+    $this->withToken($token)
+        ->getJson('/api/premium/settings')
+        ->assertStatus(200)
+        ->assertJsonPath('data.is_premium', true);
+});
+
+it('is_premium es false cuando premium_until ya expiró y is_premium es false', function () {
+    ['user' => $user, 'token' => $token] = createPremiumTestUser(isPremium: false);
+    $user->update(['premium_until' => now()->subDay()]);
+
+    $this->withToken($token)
+        ->getJson('/api/premium/settings')
+        ->assertStatus(200)
+        ->assertJsonPath('data.is_premium', false);
+});
+
 it('chat_ad_video_url es null cuando no hay video configurado', function () {
     ['token' => $token] = createPremiumTestUser();
 
@@ -93,4 +113,14 @@ it('crea PlatformSetting con los defaults de la migración si no existe ninguna 
 
 it('requiere autenticación', function () {
     $this->getJson('/api/premium/settings')->assertStatus(401);
+});
+
+it('expone rewind_credits del usuario autenticado', function () {
+    ['user' => $user, 'token' => $token] = createPremiumTestUser();
+    $user->update(['rewind_credits' => 4]);
+
+    $this->withToken($token)
+        ->getJson('/api/premium/settings')
+        ->assertStatus(200)
+        ->assertJsonPath('data.rewind_credits', 4);
 });

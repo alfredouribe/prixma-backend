@@ -3,6 +3,8 @@
 use App\Filament\Resources\UserResource\Pages\ListUsers;
 use App\Filament\Resources\UserResource\Pages\ViewUser;
 use App\Models\Admin;
+use App\Models\Package;
+use App\Models\PackageGrant;
 use App\Models\Profile;
 use App\Models\Report;
 use App\Models\User;
@@ -326,6 +328,164 @@ it('un superadmin también puede quitar el ban', function () {
         ->callTableAction('unban', $user);
 
     expect($user->fresh()->status)->toBe('active');
+});
+
+// ---------------------------------------------------------------------------
+// Otorgar paquete (features/premium/specs/ → "Catálogo de paquetes") —
+// tercera excepción al "solo lectura" de este recurso, mismo patrón que
+// togglePremium/unban. Delega en PackageService::grantToUser(), ya probado a
+// nivel de Service en tests/Feature/Premium/PackageServiceTest.php — aquí
+// solo se cubre el wiring de Filament (el select solo ofrece paquetes
+// activos, y que el Service es el que realmente aplica el efecto).
+// ---------------------------------------------------------------------------
+
+it('otorga un paquete de premium_days a un usuario y extiende premium_until', function () {
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create(['premium_until' => null]);
+    $package = Package::factory()->premiumDays(7)->create(['is_active' => true]);
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ListUsers::class)
+        // El PK UUID vuelve de Eloquent como Ramsey\Uuid\Lazy\LazyUuidFromString,
+        // no un string plano — Livewire no tiene synthesizer para ese tipo al
+        // serializar mountedTableActionsData, mismo patrón ya usado en el
+        // resto de la suite (ver ChatTest.php/MatchingTest.php → (string) $x->id).
+        ->callTableAction('grantPackage', $user, data: [
+            'package_id' => (string) $package->id,
+        ]);
+
+    expect($user->fresh()->premium_until)->not->toBeNull();
+    expect($user->fresh()->premium_until->isFuture())->toBeTrue();
+    expect(now()->diffInDays($user->fresh()->premium_until))->toBeGreaterThanOrEqual(6);
+});
+
+it('el select de otorgar paquete solo ofrece paquetes activos', function () {
+    // Nombres sin acentos a propósito: el select de Filament serializa sus
+    // opciones como JSON embebido en un <script> (JSON.parse(...)), donde
+    // los caracteres acentuados quedan escapados como \uXXXX — assertSee()
+    // compara contra el HTML literal (con e()), así que un nombre con
+    // acentos daría un falso negativo aquí aunque la opción sí esté presente.
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create();
+    Package::factory()->create(['is_active' => true, 'name' => 'Paquete Activo Unico']);
+    Package::factory()->inactive()->create(['name' => 'Paquete Inactivo Unico']);
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ListUsers::class)
+        ->mountTableAction('grantPackage', $user)
+        ->assertSee('Paquete Activo Unico')
+        ->assertDontSee('Paquete Inactivo Unico');
+});
+
+it('un superadmin también puede otorgar un paquete', function () {
+    $superadmin = Admin::factory()->superadmin()->create();
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create(['rewind_credits' => 0]);
+    $package = Package::factory()->rewindCredits(3)->create(['is_active' => true]);
+
+    $this->actingAs($superadmin, 'admin');
+
+    Livewire::test(ListUsers::class)
+        ->callTableAction('grantPackage', $user, data: [
+            'package_id' => (string) $package->id,
+        ]);
+
+    expect($user->fresh()->rewind_credits)->toBe(3);
+});
+
+// ---------------------------------------------------------------------------
+// Premium y perks (features/premium/specs/ → "Historial de paquetes
+// otorgados") — nueva sección de ViewUser con el estado actual de perks del
+// usuario y su historial de PackageGrant.
+// ---------------------------------------------------------------------------
+
+it('el detalle muestra el estado actual de perks del usuario', function () {
+    $premiumUntil = now()->addDays(5);
+    $seeLikersUntil = now()->addDays(3);
+    $boostedUntil = now()->addMinutes(30);
+
+    $user = User::factory()->withCompletedOnboarding()->create([
+        'is_premium' => true,
+        'premium_until' => $premiumUntil,
+        'see_likers_until' => $seeLikersUntil,
+        'rewind_credits' => 4,
+        'extra_super_likes' => 2,
+    ]);
+    Profile::factory()->for($user)->create(['boosted_until' => $boostedUntil]);
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ViewUser::class, ['record' => $user->id])
+        ->assertSuccessful()
+        ->assertSee($premiumUntil->format('d/m/Y H:i'))
+        ->assertSee($seeLikersUntil->format('d/m/Y H:i'))
+        ->assertSee($boostedUntil->format('d/m/Y H:i'))
+        ->assertSee('4')
+        ->assertSee('2');
+});
+
+it('el detalle muestra el historial de paquetes otorgados, más reciente primero', function () {
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create();
+    $admin = Admin::factory()->create(['name' => 'Staff Otorgante Único']);
+
+    // created_at se controla vía save() sobre un modelo ya existente (no
+    // create()), porque PackageGrant::booted() pisa created_at con now()
+    // dentro del evento `creating` — mismo criterio ya usado en el resto de
+    // la suite para forzar orden cronológico (ver MatchingTest.php).
+    $oldGrant = PackageGrant::create([
+        'user_id' => $user->id,
+        'admin_id' => $admin->id,
+        'package_name' => 'Paquete Viejo Único',
+        'grant_type' => 'rewind_credits',
+        'grant_value' => 3,
+    ]);
+    $oldGrant->created_at = now()->subDays(2);
+    $oldGrant->save();
+
+    PackageGrant::create([
+        'user_id' => $user->id,
+        'admin_id' => $admin->id,
+        'package_name' => 'Paquete Reciente Único',
+        'grant_type' => 'premium_days',
+        'grant_value' => 7,
+    ]);
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ViewUser::class, ['record' => $user->id])
+        ->assertSuccessful()
+        ->assertSee('Paquete Reciente Único')
+        ->assertSee('Paquete Viejo Único')
+        ->assertSee('Staff Otorgante Único')
+        ->assertSeeInOrder(['Paquete Reciente Único', 'Paquete Viejo Único']);
+});
+
+it('el detalle muestra "Sistema" cuando el otorgamiento no tiene admin asociado', function () {
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create();
+
+    PackageGrant::create([
+        'user_id' => $user->id,
+        'admin_id' => null,
+        'package_name' => 'Paquete Sin Admin Único',
+        'grant_type' => 'boost_minutes',
+        'grant_value' => 15,
+    ]);
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ViewUser::class, ['record' => $user->id])
+        ->assertSuccessful()
+        ->assertSee('Paquete Sin Admin Único')
+        ->assertSee('Sistema');
+});
+
+it('el detalle muestra el estado vacío cuando el usuario no tiene historial de paquetes', function () {
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create();
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ViewUser::class, ['record' => $user->id])
+        ->assertSuccessful()
+        ->assertSee('Sin paquetes otorgados');
 });
 
 // ---------------------------------------------------------------------------

@@ -11,11 +11,19 @@ use App\Http\Controllers\Api\Premium\PremiumSettingsController;
 use App\Http\Controllers\Api\Profile\ProfileController;
 use App\Http\Controllers\Api\Safety\SafetyController;
 use App\Http\Controllers\Api\Verification\VerificationController;
+use App\Http\Controllers\Api\Webhooks\RevenueCatWebhookController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', fn () => response()->json(['status' => 'ok']));
+
+// Llamado por RevenueCat, no por un usuario de la app — fuera de
+// auth:sanctum, verificado por secreto compartido en
+// VerifyRevenueCatWebhookSecret (alias 'revenuecat.webhook'). Ver
+// features/subscriptions/specs/plan.md → "Webhook de RevenueCat".
+Route::post('/webhooks/revenuecat', [RevenueCatWebhookController::class, 'handle'])
+    ->middleware('revenuecat.webhook');
 
 Route::prefix('auth')->middleware('throttle:auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
@@ -79,6 +87,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('matching')->group(function () {
         Route::get('/explore', [MatchingController::class, 'explore']);
         Route::post('/swipe', [MatchingController::class, 'swipe']);
+        Route::post('/rewind', [MatchingController::class, 'rewind']);
+        Route::get('/likers', [MatchingController::class, 'likers']);
         Route::get('/matches', [MatchingController::class, 'matches']);
         Route::get('/preferences', [MatchingController::class, 'getPreferences']);
         Route::put('/preferences', [MatchingController::class, 'updatePreferences']);

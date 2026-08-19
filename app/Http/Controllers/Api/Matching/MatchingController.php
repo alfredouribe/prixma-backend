@@ -37,6 +37,20 @@ class MatchingController extends Controller
         return response()->json(['data' => $result]);
     }
 
+    public function rewind(Request $request): JsonResponse
+    {
+        $result = $this->matchingService->rewindLastSwipe($request->user());
+
+        return response()->json(['data' => $result]);
+    }
+
+    public function likers(Request $request): AnonymousResourceCollection
+    {
+        $likers = $this->matchingService->getLikers($request->user());
+
+        return ExploreProfileResource::collection($likers);
+    }
+
     public function matches(Request $request): AnonymousResourceCollection
     {
         $matches = $this->matchingService->getMatches($request->user());

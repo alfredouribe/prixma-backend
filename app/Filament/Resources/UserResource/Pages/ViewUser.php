@@ -2,12 +2,15 @@
 
 namespace App\Filament\Resources\UserResource\Pages;
 
+use App\Filament\Resources\PackageResource;
 use App\Filament\Resources\ReportResource;
 use App\Filament\Resources\UserResource;
+use App\Models\PackageGrant;
 use App\Models\Report;
 use App\Models\User;
 use App\Models\UserMatch;
 use App\Services\MatchingService;
+use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\ImageEntry;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\Section;
@@ -34,6 +37,8 @@ class ViewUser extends ViewRecord
     private const NO_REPORTS_RECEIVED_TEXT = 'Este usuario no ha sido reportado';
 
     private const NO_MATCHES_TEXT = 'Sin matches activos';
+
+    private const NO_PACKAGE_GRANTS_TEXT = 'Sin paquetes otorgados';
 
     private const VIDEO_PROCESSING_TEXT = 'Video en proceso';
 
@@ -92,6 +97,27 @@ class ViewUser extends ViewRecord
             ->map(fn (UserMatch $match): array => [
                 'other_user' => $match->other_user->profile?->display_name ?? $match->other_user->email,
                 'created_at' => $match->created_at,
+            ])
+            ->all();
+
+        // Mismo criterio de aplanado que reportsSentRows/reportsReceivedRows
+        // arriba — cada fila necesita el label en español de grant_type
+        // (PackageResource::grantTypeLabels(), reutilizado tal cual, no
+        // reinventado) y el fallback "Sistema" cuando el otorgamiento no
+        // tiene admin asociado (llamadas sin `$grantedBy`, ver
+        // PackageService::grantToUser()). Es un log inmutable — no hay
+        // relación real "por fila" que necesite resolverse aparte de
+        // `admin`, así que basta con el eager load de abajo.
+        $packageGrantRows = $user->packageGrants()
+            ->with('admin')
+            ->latest('created_at')
+            ->get()
+            ->map(fn (PackageGrant $grant): array => [
+                'package_name' => $grant->package_name,
+                'grant_type' => PackageResource::grantTypeLabels()[$grant->grant_type] ?? $grant->grant_type,
+                'grant_value' => "{$grant->grant_value} ".(PackageResource::grantValueUnitLabels()[$grant->grant_type] ?? ''),
+                'admin_name' => $grant->admin?->name ?? 'Sistema',
+                'created_at' => $grant->created_at,
             ])
             ->all();
 
@@ -277,6 +303,68 @@ class ViewUser extends ViewRecord
                             ->state(self::NO_MATCHES_TEXT)
                             ->color('gray')
                             ->visible(blank($matchRows)),
+                    ]),
+
+                Section::make('Premium y perks')
+                    ->description('Estado actual de los beneficios de Prixma+ y el historial de paquetes otorgados a este usuario. Ver features/premium/specs/spec.md → "Historial de paquetes otorgados".')
+                    ->columns(3)
+                    ->schema([
+                        // is_premium es el toggle manual sin expiración
+                        // (`UserResource::togglePremium`) — un campo de dato
+                        // administrativo, no el gate real (`hasPremiumAccess()`
+                        // combina esto con premium_until, ver User model).
+                        IconEntry::make('is_premium')
+                            ->label('Premium (manual)')
+                            ->boolean(),
+
+                        TextEntry::make('premium_until')
+                            ->label('Premium hasta')
+                            ->dateTime('d/m/Y H:i')
+                            ->placeholder('—'),
+
+                        TextEntry::make('boostedUntil')
+                            ->label('Boost activo hasta')
+                            ->state($profile?->boosted_until)
+                            ->dateTime('d/m/Y H:i')
+                            ->placeholder('—'),
+
+                        TextEntry::make('see_likers_until')
+                            ->label('Ver quién dio like hasta')
+                            ->dateTime('d/m/Y H:i')
+                            ->placeholder('—'),
+
+                        TextEntry::make('rewind_credits')
+                            ->label('Créditos de rewind')
+                            ->state($user->rewind_credits ?? 0),
+
+                        TextEntry::make('extra_super_likes')
+                            ->label('Super likes extra')
+                            ->state($user->extra_super_likes ?? 0),
+
+                        // Mismo patrón que reportsSentRows/matchRows arriba:
+                        // datos ya aplanados a array antes de ->state()
+                        // (ver nota técnica de ViewReport en
+                        // features/safety/specs/plan.md).
+                        RepeatableEntry::make('packageGrantRows')
+                            ->label('Historial de paquetes otorgados')
+                            ->state($packageGrantRows)
+                            ->columns(5)
+                            ->columnSpanFull()
+                            ->visible(filled($packageGrantRows))
+                            ->schema([
+                                TextEntry::make('package_name')->label('Paquete'),
+                                TextEntry::make('grant_type')->label('Tipo')->badge()->color('gray'),
+                                TextEntry::make('grant_value')->label('Cantidad'),
+                                TextEntry::make('admin_name')->label('Otorgado por'),
+                                TextEntry::make('created_at')->label('Fecha')->dateTime('d/m/Y H:i'),
+                            ]),
+
+                        TextEntry::make('noPackageGrants')
+                            ->hiddenLabel()
+                            ->state(self::NO_PACKAGE_GRANTS_TEXT)
+                            ->color('gray')
+                            ->columnSpanFull()
+                            ->visible(blank($packageGrantRows)),
                     ]),
             ]);
     }

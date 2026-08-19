@@ -25,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->statefulApi();
         $middleware->alias([
             'onboarding.completed' => \App\Http\Middleware\EnsureOnboardingCompleted::class,
+            'revenuecat.webhook' => \App\Http\Middleware\VerifyRevenueCatWebhookSecret::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
