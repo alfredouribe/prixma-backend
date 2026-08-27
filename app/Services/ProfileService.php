@@ -286,9 +286,17 @@ class ProfileService
                 ->count()
             : 0;
 
-        $eventsCount = Schema::hasTable('event_attendees')
-            ? DB::table('event_attendees')
+        // Bug real corregido 2026-08-18: la tabla se llama `event_rsvps`
+        // (ver create_event_rsvps_table), nunca existió `event_attendees` —
+        // Schema::hasTable() siempre daba false y events_count quedaba en 0
+        // en silencio para todo mundo, sin ningún error visible. Se excluye
+        // `not_going` (mismo criterio ya usado en `interested_count`/
+        // `going_count` de EventResource: un RSVP rechazado no cuenta como
+        // "tu evento").
+        $eventsCount = Schema::hasTable('event_rsvps')
+            ? DB::table('event_rsvps')
                 ->where('user_id', $profile->user_id)
+                ->whereIn('status', ['interested', 'going'])
                 ->count()
             : 0;
 

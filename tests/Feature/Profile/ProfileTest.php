@@ -98,6 +98,41 @@ describe('me', function () {
         expect($otherResponse->json('data.statistics.matches_count'))->toBe(1);
     });
 
+    it('cuenta eventos reales (interested/going) en las estadísticas, excluyendo not_going', function () {
+        // Regresión: calculateStatistics() consultaba una tabla que nunca
+        // existió (`event_attendees` en vez de `event_rsvps`) —
+        // Schema::hasTable() daba false en silencio y events_count se
+        // quedaba en 0 para todo mundo, sin ningún error visible. El único
+        // test anterior de esta sección solo cubría el caso "0 sin datos",
+        // que pasa igual esté el nombre de tabla bien o mal — por eso no se
+        // detectó antes.
+        $goingEvent = \App\Models\Event::factory()->create();
+        $interestedEvent = \App\Models\Event::factory()->create();
+        $notGoingEvent = \App\Models\Event::factory()->create();
+
+        \App\Models\EventRsvp::create([
+            'event_id' => $goingEvent->id,
+            'user_id'  => $this->user->id,
+            'status'   => 'going',
+        ]);
+        \App\Models\EventRsvp::create([
+            'event_id' => $interestedEvent->id,
+            'user_id'  => $this->user->id,
+            'status'   => 'interested',
+        ]);
+        \App\Models\EventRsvp::create([
+            'event_id' => $notGoingEvent->id,
+            'user_id'  => $this->user->id,
+            'status'   => 'not_going',
+        ]);
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/profiles/me')
+            ->assertStatus(200);
+
+        expect($response->json('data.statistics.events_count'))->toBe(2);
+    });
+
     it('incluye verification_status con el valor por defecto unverified', function () {
         $this->withToken($this->token)
             ->getJson('/api/profiles/me')

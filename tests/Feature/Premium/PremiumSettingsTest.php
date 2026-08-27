@@ -124,3 +124,34 @@ it('expone rewind_credits del usuario autenticado', function () {
         ->assertStatus(200)
         ->assertJsonPath('data.rewind_credits', 4);
 });
+
+it('expone extra_super_likes del usuario autenticado', function () {
+    ['user' => $user, 'token' => $token] = createPremiumTestUser();
+    $user->update(['extra_super_likes' => 3]);
+
+    $this->withToken($token)
+        ->getJson('/api/premium/settings')
+        ->assertStatus(200)
+        ->assertJsonPath('data.extra_super_likes', 3);
+});
+
+it('expone premium_until del usuario autenticado cuando está presente', function () {
+    ['user' => $user, 'token' => $token] = createPremiumTestUser();
+    $expiry = now()->addDays(5);
+    $user->update(['premium_until' => $expiry]);
+
+    $response = $this->withToken($token)
+        ->getJson('/api/premium/settings')
+        ->assertStatus(200);
+
+    expect($response->json('data.premium_until'))->not->toBeNull();
+});
+
+it('premium_until es null cuando el usuario nunca tuvo uno', function () {
+    ['token' => $token] = createPremiumTestUser();
+
+    $this->withToken($token)
+        ->getJson('/api/premium/settings')
+        ->assertStatus(200)
+        ->assertJsonPath('data.premium_until', null);
+});
