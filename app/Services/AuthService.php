@@ -5,14 +5,25 @@ namespace App\Services;
 use App\Exceptions\AuthorizationException;
 use App\Exceptions\BusinessException;
 use App\Exceptions\UnauthorizedException;
+use App\Mail\PasswordResetCodeMail;
 use App\Mail\VerifyEmailMail;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\Password;
 
 class AuthService
 {
+    // Corto a propósito porque es un código de 6 dígitos que se teclea a
+    // mano (no un link de 60 caracteres) — mismo criterio que cualquier OTP;
+    // la ruta ya está bajo `throttle:auth` (5 intentos/min/IP) así que un
+    // código de vida corta más ese límite hacen inviable un ataque de fuerza
+    // bruta. Reemplaza el flujo con `Password::sendResetLink()`/`Password::
+    // reset()` (pensado para un link, no para que el usuario copie un token
+    // de 60 caracteres a mano) — bug real reportado por el humano 2026-09-27:
+    // el correo mostraba un botón/link pero la app pedía un código.
+    private const CODE_EXPIRY_MINUTES = 15;
+
     public function register(array $data): array
     {
         $user = User::create([
@@ -77,29 +88,55 @@ class AuthService
 
     public function forgotPassword(string $email): void
     {
-        Password::sendResetLink(['email' => $email]);
+        $user = User::where('email', $email)->first();
+
+        // Nunca revelar si el correo existe (constitution.md) — si no hay
+        // usuario, simplemente no se guarda ni se encola nada, y el
+        // controlador ya responde el mismo mensaje genérico en ambos casos.
+        if (! $user) {
+            return;
+        }
+
+        $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+
+        DB::table('password_reset_tokens')->updateOrInsert(
+            ['email' => $email],
+            ['token' => Hash::make($code), 'created_at' => now()]
+        );
+
+        Mail::to($email)->queue(new PasswordResetCodeMail($code));
     }
 
     public function resetPassword(array $data): void
     {
-        $status = Password::reset(
-            [
-                'email'    => $data['email'],
-                'token'    => $data['token'],
-                'password' => $data['password'],
-            ],
-            function (User $user, string $password) {
-                $user->password = $password;
-                $user->save();
-            }
-        );
+        $record = DB::table('password_reset_tokens')->where('email', $data['email'])->first();
 
-        if ($status !== Password::PASSWORD_RESET) {
-            throw new BusinessException(match ($status) {
-                Password::INVALID_TOKEN => 'El enlace de recuperación ha expirado o ya fue usado.',
-                Password::INVALID_USER  => 'No se encontró el usuario.',
-                default                 => 'No se pudo restablecer la contraseña.',
-            });
+        // `diffInMinutes(..., true)` — el segundo argumento (`$absolute`) es
+        // obligatorio aquí: Carbon 3 (instalado en este proyecto) cambió el
+        // default de `diffInMinutes()` de absoluto a con signo, a diferencia
+        // de Carbon 2. Sin `true` explícito, la diferencia contra una fecha
+        // pasada da negativa y esta condición nunca detecta un código
+        // vencido — bug real encontrado por el test "rechaza un código
+        // expirado" al escribir este flujo (2026-09-27).
+        if (! $record || now()->diffInMinutes($record->created_at, true) > self::CODE_EXPIRY_MINUTES) {
+            throw new BusinessException('El código expiró o es inválido. Solicita uno nuevo.');
         }
+
+        if (! Hash::check($data['token'], $record->token)) {
+            throw new BusinessException('El código ingresado es incorrecto.');
+        }
+
+        $user = User::where('email', $data['email'])->first();
+
+        if (! $user) {
+            throw new BusinessException('No se encontró el usuario.');
+        }
+
+        $user->password = $data['password'];
+        $user->save();
+
+        // De un solo uso — mismo criterio que el broker de Laravel que
+        // reemplaza este flujo.
+        DB::table('password_reset_tokens')->where('email', $data['email'])->delete();
     }
 }

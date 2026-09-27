@@ -1,16 +1,36 @@
 <?php
 
+use App\Mail\PasswordResetCodeMail;
 use App\Models\User;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\Mail;
 
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 
 beforeEach(function () {
     Cache::flush();
 });
+
+// El código real solo existe en texto plano dentro del correo encolado (en
+// la base de datos se guarda hasheado, igual que una contraseña) — se
+// captura interceptando el Mailable con Mail::fake() en vez de leer la BD.
+function requestResetCode(string $email): string
+{
+    Mail::fake();
+
+    test()->postJson('/api/auth/forgot-password', ['email' => $email]);
+
+    $code = null;
+    Mail::assertQueued(PasswordResetCodeMail::class, function ($mail) use (&$code) {
+        $code = $mail->code;
+
+        return true;
+    });
+
+    return $code;
+}
 
 // ---------------------------------------------------------------------------
 // Registro
@@ -196,6 +216,20 @@ describe('recuperación de contraseña', function () {
             ->assertJsonPath('message', 'Si existe una cuenta con ese correo, recibirás instrucciones.');
     });
 
+    it('encola PasswordResetCodeMail con un código de 6 dígitos numéricos solo si el correo existe', function () {
+        User::factory()->create(['email' => 'real@example.com']);
+        Mail::fake();
+
+        $this->postJson('/api/auth/forgot-password', ['email' => 'real@example.com']);
+        Mail::assertQueued(PasswordResetCodeMail::class, function ($mail) {
+            return $mail->hasTo('real@example.com') && preg_match('/^\d{6}$/', $mail->code) === 1;
+        });
+
+        Mail::fake();
+        $this->postJson('/api/auth/forgot-password', ['email' => 'noexiste@example.com']);
+        Mail::assertNothingQueued();
+    });
+
 });
 
 // ---------------------------------------------------------------------------
@@ -204,13 +238,13 @@ describe('recuperación de contraseña', function () {
 
 describe('reset de contraseña', function () {
 
-    it('actualiza la contraseña con token válido', function () {
+    it('actualiza la contraseña con un código válido', function () {
         $user = User::factory()->create(['email' => 'reset@example.com']);
-        $token = Password::createToken($user);
+        $code = requestResetCode('reset@example.com');
 
         $this->postJson('/api/auth/reset-password', [
             'email'                 => 'reset@example.com',
-            'token'                 => $token,
+            'token'                 => $code,
             'password'              => 'nuevapassword123',
             'password_confirmation' => 'nuevapassword123',
         ])->assertStatus(200)
@@ -219,21 +253,69 @@ describe('reset de contraseña', function () {
         $this->assertTrue(Hash::check('nuevapassword123', $user->fresh()->password));
     });
 
-    it('rechaza token expirado o inválido', function () {
+    it('rechaza un código expirado', function () {
         $user = User::factory()->create(['email' => 'reset@example.com']);
-        $token = Password::createToken($user);
+        $code = requestResetCode('reset@example.com');
 
         DB::table('password_reset_tokens')
             ->where('email', $user->email)
-            ->update(['created_at' => now()->subMinutes(61)]);
+            ->update(['created_at' => now()->subMinutes(16)]);
 
         $this->postJson('/api/auth/reset-password', [
             'email'                 => 'reset@example.com',
-            'token'                 => $token,
+            'token'                 => $code,
             'password'              => 'nuevapassword123',
             'password_confirmation' => 'nuevapassword123',
         ])->assertStatus(400)
-            ->assertJsonPath('message', 'El enlace de recuperación ha expirado o ya fue usado.');
+            ->assertJsonPath('message', 'El código expiró o es inválido. Solicita uno nuevo.');
+    });
+
+    it('rechaza un código incorrecto sin tocar la contraseña', function () {
+        $user = User::factory()->create(['email' => 'reset@example.com']);
+        requestResetCode('reset@example.com');
+        $originalPassword = $user->password;
+
+        $this->postJson('/api/auth/reset-password', [
+            'email'                 => 'reset@example.com',
+            'token'                 => '000000',
+            'password'              => 'nuevapassword123',
+            'password_confirmation' => 'nuevapassword123',
+        ])->assertStatus(400)
+            ->assertJsonPath('message', 'El código ingresado es incorrecto.');
+
+        expect($user->fresh()->password)->toBe($originalPassword);
+    });
+
+    it('es de un solo uso — el mismo código no sirve dos veces', function () {
+        User::factory()->create(['email' => 'reset@example.com']);
+        $code = requestResetCode('reset@example.com');
+
+        $this->postJson('/api/auth/reset-password', [
+            'email'                 => 'reset@example.com',
+            'token'                 => $code,
+            'password'              => 'primeraNueva123',
+            'password_confirmation' => 'primeraNueva123',
+        ])->assertStatus(200);
+
+        $this->postJson('/api/auth/reset-password', [
+            'email'                 => 'reset@example.com',
+            'token'                 => $code,
+            'password'              => 'segundaNueva123',
+            'password_confirmation' => 'segundaNueva123',
+        ])->assertStatus(400)
+            ->assertJsonPath('message', 'El código expiró o es inválido. Solicita uno nuevo.');
+    });
+
+    it('rechaza un código que no tenga exactamente 6 dígitos', function () {
+        User::factory()->create(['email' => 'reset@example.com']);
+
+        $this->postJson('/api/auth/reset-password', [
+            'email'                 => 'reset@example.com',
+            'token'                 => '12345',
+            'password'              => 'nuevapassword123',
+            'password_confirmation' => 'nuevapassword123',
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors('token');
     });
 
 });

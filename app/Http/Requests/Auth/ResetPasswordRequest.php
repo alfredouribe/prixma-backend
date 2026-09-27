@@ -14,7 +14,7 @@ class ResetPasswordRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'token'                 => 'required|string',
+            'token'                 => 'required|string|size:6',
             'email'                 => 'required|email',
             'password'              => 'required|min:8|confirmed',
         ];
@@ -23,6 +23,7 @@ class ResetPasswordRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'token.size'          => 'El código debe tener 6 dígitos.',
             'password.min'       => 'La contraseña debe tener al menos 8 caracteres.',
             'password.confirmed' => 'Las contraseñas no coinciden.',
         ];
