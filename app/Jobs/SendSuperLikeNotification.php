@@ -3,7 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\User;
-use App\Services\FcmService;
+use App\Services\ExpoPushService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -30,7 +30,7 @@ class SendSuperLikeNotification implements ShouldQueue
         $this->onQueue('notifications');
     }
 
-    public function handle(FcmService $fcm): void
+    public function handle(ExpoPushService $expoPush): void
     {
         $notification = $this->recipient->notifications()->create([
             'type' => 'super_like',
@@ -44,7 +44,7 @@ class SendSuperLikeNotification implements ShouldQueue
             return;
         }
 
-        $sent = $fcm->sendToDevices($tokens, [
+        $sent = $expoPush->sendToDevices($tokens, [
             'title' => self::TITLE,
             'body' => self::BODY,
             'data' => ['type' => 'super_like'],

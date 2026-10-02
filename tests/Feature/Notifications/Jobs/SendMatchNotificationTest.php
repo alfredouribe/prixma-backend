@@ -5,7 +5,7 @@ use App\Models\DeviceToken;
 use App\Models\Notification;
 use App\Models\Profile;
 use App\Models\User;
-use App\Services\FcmService;
+use App\Services\ExpoPushService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 
@@ -40,24 +40,24 @@ test('crea una notificación in-app para ambos usuarios, sin importar si tienen 
     expect($notification2->body)->toBe('Tú y Alex se gustaron mutuamente.');
 });
 
-test('marca sent_at cuando FcmService confirma el envío', function () {
+test('marca sent_at cuando ExpoPushService confirma el envío', function () {
     $user1 = createMatchNotificationUser('Alex');
     $user2 = createMatchNotificationUser('Sam');
     DeviceToken::factory()->for($user1)->create();
 
-    $this->mock(FcmService::class)->shouldReceive('sendToDevices')->once()->andReturn(true);
+    $this->mock(ExpoPushService::class)->shouldReceive('sendToDevices')->once()->andReturn(true);
 
     app()->call([new SendMatchNotification($user1, $user2, (string) Str::uuid()), 'handle']);
 
     expect(Notification::where('user_id', $user1->id)->first()->sent_at)->not->toBeNull();
 });
 
-test('no marca sent_at cuando FCM no está configurado (best-effort)', function () {
+test('no marca sent_at cuando el envío de push falla (best-effort)', function () {
     $user1 = createMatchNotificationUser('Alex');
     $user2 = createMatchNotificationUser('Sam');
     DeviceToken::factory()->for($user1)->create();
 
-    $this->mock(FcmService::class)->shouldReceive('sendToDevices')->once()->andReturn(false);
+    $this->mock(ExpoPushService::class)->shouldReceive('sendToDevices')->once()->andReturn(false);
 
     app()->call([new SendMatchNotification($user1, $user2, (string) Str::uuid()), 'handle']);
 
@@ -68,7 +68,7 @@ test('no intenta enviar push si el usuario no tiene tokens de dispositivo', func
     $user1 = createMatchNotificationUser('Alex');
     $user2 = createMatchNotificationUser('Sam');
 
-    $this->mock(FcmService::class)->shouldNotReceive('sendToDevices');
+    $this->mock(ExpoPushService::class)->shouldNotReceive('sendToDevices');
 
     app()->call([new SendMatchNotification($user1, $user2, (string) Str::uuid()), 'handle']);
 });

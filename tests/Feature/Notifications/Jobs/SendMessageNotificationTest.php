@@ -7,7 +7,7 @@ use App\Models\Message;
 use App\Models\Notification;
 use App\Models\Profile;
 use App\Models\User;
-use App\Services\FcmService;
+use App\Services\ExpoPushService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -47,7 +47,7 @@ test('no trunca ni agrega puntos suspensivos cuando el mensaje ya es corto', fun
     expect(Notification::where('user_id', $recipient->id)->first()->body)->toBe('Hola!');
 });
 
-test('marca sent_at cuando FcmService confirma el envío', function () {
+test('marca sent_at cuando ExpoPushService confirma el envío', function () {
     $sender = User::factory()->withCompletedOnboarding()->create();
     Profile::factory()->for($sender)->create(['display_name' => 'Jordan']);
     $recipient = User::factory()->withCompletedOnboarding()->create();
@@ -55,7 +55,7 @@ test('marca sent_at cuando FcmService confirma el envío', function () {
     $conversation = Conversation::factory()->betweenUsers($sender, $recipient)->create();
     $message = Message::factory()->for($conversation)->create(['sender_id' => $sender->id]);
 
-    $this->mock(FcmService::class)->shouldReceive('sendToDevices')->once()->andReturn(true);
+    $this->mock(ExpoPushService::class)->shouldReceive('sendToDevices')->once()->andReturn(true);
 
     app()->call([new SendMessageNotification($recipient, $sender, $message), 'handle']);
 

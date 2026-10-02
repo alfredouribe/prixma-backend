@@ -4,7 +4,7 @@ use App\Jobs\SendSuperLikeNotification;
 use App\Models\DeviceToken;
 use App\Models\Notification;
 use App\Models\User;
-use App\Services\FcmService;
+use App\Services\ExpoPushService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -20,11 +20,11 @@ test('crea notificación in-app sin revelar quién dio el super like', function 
     expect($notification->body)->toBe('Explora para descubrir quién.');
 });
 
-test('marca sent_at cuando FcmService confirma el envío', function () {
+test('marca sent_at cuando ExpoPushService confirma el envío', function () {
     $recipient = User::factory()->withCompletedOnboarding()->create();
     DeviceToken::factory()->for($recipient)->create();
 
-    $this->mock(FcmService::class)->shouldReceive('sendToDevices')->once()->andReturn(true);
+    $this->mock(ExpoPushService::class)->shouldReceive('sendToDevices')->once()->andReturn(true);
 
     app()->call([new SendSuperLikeNotification($recipient), 'handle']);
 

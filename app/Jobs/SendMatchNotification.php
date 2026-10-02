@@ -3,7 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\User;
-use App\Services\FcmService;
+use App\Services\ExpoPushService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -32,7 +32,7 @@ class SendMatchNotification implements ShouldQueue
         $this->onQueue('notifications');
     }
 
-    public function handle(FcmService $fcm): void
+    public function handle(ExpoPushService $expoPush): void
     {
         foreach ([$this->user1, $this->user2] as $user) {
             $otherUser = $user->id === $this->user1->id ? $this->user2 : $this->user1;
@@ -53,14 +53,15 @@ class SendMatchNotification implements ShouldQueue
                 continue;
             }
 
-            $sent = $fcm->sendToDevices($tokens, [
+            $sent = $expoPush->sendToDevices($tokens, [
                 'title' => self::TITLE,
                 'body' => "Tú y {$otherUser->profile?->display_name} se gustaron mutuamente.",
                 'data' => ['conversation_id' => $this->conversationId, 'type' => 'match'],
             ]);
 
-            // domain.md → Notification: "sent_at se registra cuando FCM
-            // confirma entrega" — nunca se asume éxito solo por intentarlo.
+            // domain.md → Notification: "sent_at se registra cuando el
+            // push se confirma entregado" — nunca se asume éxito solo por
+            // intentarlo.
             if ($sent) {
                 $notification->update(['sent_at' => now()]);
             }

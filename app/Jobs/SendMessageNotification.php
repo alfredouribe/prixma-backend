@@ -4,7 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Message;
 use App\Models\User;
-use App\Services\FcmService;
+use App\Services\ExpoPushService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -33,7 +33,7 @@ class SendMessageNotification implements ShouldQueue
         $this->onQueue('notifications');
     }
 
-    public function handle(FcmService $fcm): void
+    public function handle(ExpoPushService $expoPush): void
     {
         $title = $this->sender->profile?->display_name ?? '';
         $preview = Str::limit($this->message->content, self::PREVIEW_LENGTH);
@@ -51,7 +51,7 @@ class SendMessageNotification implements ShouldQueue
             return;
         }
 
-        $sent = $fcm->sendToDevices($tokens, [
+        $sent = $expoPush->sendToDevices($tokens, [
             'title' => $title,
             'body' => $preview,
             'data' => ['conversation_id' => $this->message->conversation_id, 'type' => 'message'],

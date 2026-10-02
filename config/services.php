@@ -36,19 +36,15 @@ return [
     ],
 
     /*
-    | FCM (Firebase Cloud Messaging) — ver features/notifications/specs/plan.md
-    | → "FCM sin credenciales". `FcmService` solo envía si
-    | `credentials_path` resuelve a un archivo real; mientras tanto es un
-    | no-op registrado en logs. `FCM_CREDENTIALS_PATH` en .env es solo la
-    | ruta RELATIVA dentro del disco privado (storage/app/private/...) —
-    | nunca una ruta absoluta ni un archivo fuera de ese disco, que está
-    | completamente excluido de git (mismo disco que usa Verification para
-    | los documentos de identidad).
+    | Expo Push Service — ver features/notifications/specs/plan.md →
+    | "Migración a Expo Push Service". `ExpoPushService` llama a la API
+    | pública de Expo (no requiere credenciales propias; Expo administra
+    | las credenciales de FCM/APNs del lado de EAS). `access_token` es
+    | opcional — solo aplica si se activa "Enhanced Security for Push
+    | Notifications" en el dashboard de Expo.
     */
-    'fcm' => [
-        'credentials_path' => env('FCM_CREDENTIALS_PATH')
-            ? storage_path('app/private/'.env('FCM_CREDENTIALS_PATH'))
-            : null,
+    'expo' => [
+        'access_token' => env('EXPO_ACCESS_TOKEN'),
     ],
 
     /*
