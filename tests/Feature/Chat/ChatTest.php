@@ -1,6 +1,7 @@
 <?php
 
 use App\Events\MessageSent;
+use App\Events\MessagesRead;
 use App\Jobs\SendMessageNotification;
 use App\Models\Conversation;
 use App\Models\Message;
@@ -494,6 +495,7 @@ describe('POST /api/chat/conversations/{id}/messages', function () {
 
 describe('POST /api/chat/conversations/{id}/read', function () {
     it('marca como leídos los mensajes no leídos del otro usuario', function () {
+        Event::fake([MessagesRead::class]);
         ['user' => $otherUser] = createChatUser();
         [$id1, $id2] = sortedIds($this->user->id, $otherUser->id);
         $conversation = Conversation::create([
@@ -520,6 +522,51 @@ describe('POST /api/chat/conversations/{id}/read', function () {
 
         expect($fromOther->fresh()->read_at)->not->toBeNull();
         expect($ownMessage->fresh()->read_at)->toBeNull();
+    });
+
+    it('bug real 2026-10-02: dispara MessagesRead cuando sí marca algo nuevo', function () {
+        Event::fake([MessagesRead::class]);
+        ['user' => $otherUser] = createChatUser();
+        [$id1, $id2] = sortedIds($this->user->id, $otherUser->id);
+        $conversation = Conversation::create([
+            'user_id_1' => $id1,
+            'user_id_2' => $id2,
+            'type' => 'match',
+            'status' => 'active',
+        ]);
+        Message::create(['conversation_id' => $conversation->id, 'sender_id' => $otherUser->id, 'content' => 'Hola']);
+
+        $this->withToken($this->token)
+            ->postJson("/api/chat/conversations/{$conversation->id}/read")
+            ->assertStatus(200);
+
+        Event::assertDispatched(MessagesRead::class, function ($event) use ($conversation) {
+            return $event->conversationId === (string) $conversation->id;
+        });
+    });
+
+    it('bug real 2026-10-02: NO dispara MessagesRead si no había nada nuevo que marcar', function () {
+        Event::fake([MessagesRead::class]);
+        ['user' => $otherUser] = createChatUser();
+        [$id1, $id2] = sortedIds($this->user->id, $otherUser->id);
+        $conversation = Conversation::create([
+            'user_id_1' => $id1,
+            'user_id_2' => $id2,
+            'type' => 'match',
+            'status' => 'active',
+        ]);
+        Message::create([
+            'conversation_id' => $conversation->id,
+            'sender_id' => $otherUser->id,
+            'content' => 'Ya leído',
+            'read_at' => now(),
+        ]);
+
+        $this->withToken($this->token)
+            ->postJson("/api/chat/conversations/{$conversation->id}/read")
+            ->assertStatus(200);
+
+        Event::assertNotDispatched(MessagesRead::class);
     });
 });
 

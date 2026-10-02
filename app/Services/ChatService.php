@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Events\MessageSent;
+use App\Events\MessagesRead;
 use App\Exceptions\AuthorizationException;
 use App\Exceptions\BusinessException;
 use App\Models\Conversation;
@@ -159,10 +160,21 @@ class ChatService
         $conversation = Conversation::findOrFail($conversationId);
         $this->assertParticipant($conversation, $user);
 
-        return Message::where('conversation_id', $conversation->id)
+        $readAt = now();
+
+        $count = Message::where('conversation_id', $conversation->id)
             ->whereNull('read_at')
             ->where('sender_id', '!=', $user->id)
-            ->update(['read_at' => now()]);
+            ->update(['read_at' => $readAt]);
+
+        // Solo avisa por Reverb si de verdad se marcó algo nuevo — evita
+        // transmitir un evento vacío en cada `useEffect` de montaje/mensaje
+        // en vivo de `useConversation` (ambos llaman a este método siempre).
+        if ($count > 0) {
+            event(new MessagesRead($conversation->id, $readAt->toJSON()));
+        }
+
+        return $count;
     }
 
     /**
