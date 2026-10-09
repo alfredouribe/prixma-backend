@@ -18,6 +18,7 @@ class OnboardingService
     {
         $profile = $user->profile()->with([
             'genderIdentities',
+            'interestedGenders',
             'orientations',
             'pronouns',
             'interests',
@@ -37,6 +38,10 @@ class OnboardingService
         $profile->display_name           = $data['display_name'];
         $profile->custom_gender_identity = $data['custom_gender_identity'] ?? null;
         $profile->custom_orientation     = $data['custom_orientation'] ?? null;
+        // "¿A quién te gustaría conocer?" — ver spec.md → "Compatibilidad de
+        // género". `interested_in_all_genders` es requerido por
+        // StepIdentityRequest, así que siempre llega explícito en este paso.
+        $profile->interested_in_all_genders = $data['interested_in_all_genders'];
 
         if ($profile->onboarding_step < 1) {
             $profile->onboarding_step = 1;
@@ -46,8 +51,9 @@ class OnboardingService
 
         $profile->genderIdentities()->sync($data['gender_identity_ids'] ?? []);
         $profile->orientations()->sync($data['orientation_ids'] ?? []);
+        $profile->interestedGenders()->sync($data['interested_gender_identity_ids'] ?? []);
 
-        return $profile->load(['genderIdentities', 'orientations']);
+        return $profile->load(['genderIdentities', 'orientations', 'interestedGenders']);
     }
 
     public function savePronouns(User $user, array $data): Profile

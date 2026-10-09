@@ -55,6 +55,16 @@ class ProfileResource extends JsonResource
             'interests'              => $this->whenLoaded('interests', fn() =>
                 $this->interests->map(fn($i) => ['id' => $i->id, 'slug' => $i->slug, 'label' => $i->label, 'category' => $i->category])
             ),
+            // "¿A quién te gustaría conocer?" — ver spec.md → "Compatibilidad
+            // de género". `interested_in_all_genders` es una columna escalar
+            // siempre presente (no depende de whenLoaded, no es una
+            // relación); `interested_genders` sigue el mismo patrón exacto
+            // ya usado arriba para gender_identities/orientations/pronouns/
+            // interests (objetos {id, slug, label}, no solo el label).
+            'interested_in_all_genders' => (bool) $this->interested_in_all_genders,
+            'interested_genders'        => $this->whenLoaded('interestedGenders', fn() =>
+                $this->interestedGenders->map(fn($g) => ['id' => $g->id, 'slug' => $g->slug, 'label' => $g->label])
+            ),
             'photos'                 => $this->whenLoaded('photos', fn() =>
                 ProfilePhotoResource::collection($this->photos)
             ),

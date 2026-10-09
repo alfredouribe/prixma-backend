@@ -32,6 +32,9 @@ class UpdateProfileRequest extends FormRequest
             'custom_orientation'     => 'sometimes|nullable|string|max:100',
             'custom_pronouns'        => 'sometimes|nullable|string|max:100',
             'custom_interests'       => 'sometimes|nullable|string|max:200',
+            'interested_in_all_genders'        => 'sometimes|boolean',
+            'interested_gender_identity_ids'   => 'sometimes|array',
+            'interested_gender_identity_ids.*' => 'uuid|exists:gender_identities,id',
         ];
     }
 }

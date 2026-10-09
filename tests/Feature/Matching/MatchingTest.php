@@ -36,6 +36,13 @@ function createUserWithProfile(array $profileData = [], array $userState = []): 
         'intention'            => 'friendship',
         'onboarding_step'      => 6,
         'onboarding_completed' => true,
+        // Compatibilidad de género (ver spec.md): por default este helper
+        // simula un perfil retrocompatible ("Todes / sin preferencia"),
+        // igual que el backfill real de la migración, para no romper las
+        // decenas de tests existentes que nunca configuraron este campo. Los
+        // tests nuevos de "Compatibilidad de género" lo overridean
+        // explícitamente vía $profileData.
+        'interested_in_all_genders' => true,
     ], $profileData));
 
     $token = $user->createToken('mobile')->plainTextToken;
@@ -352,6 +359,105 @@ describe('explore', function () {
         $ids = collect($response->json('data'))->pluck('id');
         expect($ids)->toContain((string) $communityCandidate->id, (string) $mentorshipCandidate->id);
         expect($ids)->not->toContain((string) $partnerCandidate->id);
+    });
+
+});
+
+// ---------------------------------------------------------------------------
+// Compatibilidad de género — filtro obligatorio y mutuo (2026-10-03)
+// Ver spec.md/plan.md → "Compatibilidad de género".
+// ---------------------------------------------------------------------------
+
+describe('compatibilidad de género', function () {
+
+    it('usuario A marca una identidad específica, candidato de otra identidad no incluida no aparece', function () {
+        $mujerCis = \App\Models\GenderIdentity::where('slug', 'mujer-cis')->first();
+        $hombreCis = \App\Models\GenderIdentity::where('slug', 'hombre-cis')->first();
+
+        // A solo quiere conocer a mujeres cis.
+        $this->profile->update(['interested_in_all_genders' => false]);
+        $this->profile->interestedGenders()->sync([$mujerCis->id]);
+
+        // El candidato es "Todes" de su lado — así se aísla el caso bajo
+        // prueba (filtro 1, lo que A exige) del filtro mutuo (filtro 2).
+        ['user' => $candidate, 'profile' => $candidateProfile] = createUserWithProfile([
+            'interested_in_all_genders' => true,
+        ]);
+        $candidateProfile->genderIdentities()->sync([$hombreCis->id]);
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/matching/explore')
+            ->assertStatus(200);
+
+        $ids = collect($response->json('data'))->pluck('id');
+        expect($ids)->not->toContain((string) $candidate->id);
+    });
+
+    it('candidato cuyo "a quién le interesa conocer" no incluye la identidad de A no aparece, aunque A sí lo haya incluido a él (mutuo)', function () {
+        $mujerCis = \App\Models\GenderIdentity::where('slug', 'mujer-cis')->first();
+        $hombreCis = \App\Models\GenderIdentity::where('slug', 'hombre-cis')->first();
+        $mujerTrans = \App\Models\GenderIdentity::where('slug', 'mujer-trans')->first();
+
+        // A es hombre cis y quiere conocer a mujeres cis.
+        $this->profile->update(['interested_in_all_genders' => false]);
+        $this->profile->interestedGenders()->sync([$mujerCis->id]);
+        $this->profile->genderIdentities()->sync([$hombreCis->id]);
+
+        // El candidato es mujer cis (pasa el filtro 1 de A) pero ella solo
+        // quiere conocer mujeres trans — no incluye "hombre cis" (la
+        // identidad de A) y no marcó "Todes".
+        ['user' => $candidate, 'profile' => $candidateProfile] = createUserWithProfile([
+            'interested_in_all_genders' => false,
+        ]);
+        $candidateProfile->genderIdentities()->sync([$mujerCis->id]);
+        $candidateProfile->interestedGenders()->sync([$mujerTrans->id]);
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/matching/explore')
+            ->assertStatus(200);
+
+        $ids = collect($response->json('data'))->pluck('id');
+        expect($ids)->not->toContain((string) $candidate->id);
+    });
+
+    it('usuario con "Todes / sin preferencia" no es excluido por este filtro independientemente de la identidad del candidato', function () {
+        $hombreCis = \App\Models\GenderIdentity::where('slug', 'hombre-cis')->first();
+        $generoFluido = \App\Models\GenderIdentity::where('slug', 'genero-fluido')->first();
+
+        // A marcó "Todes" — el filtro 1 (lo que A exige del candidato) no
+        // debe aplicar en absoluto.
+        $this->profile->update(['interested_in_all_genders' => true]);
+
+        ['user' => $candidate1, 'profile' => $candidate1Profile] = createUserWithProfile([
+            'interested_in_all_genders' => true,
+        ]);
+        $candidate1Profile->genderIdentities()->sync([$hombreCis->id]);
+
+        ['user' => $candidate2, 'profile' => $candidate2Profile] = createUserWithProfile([
+            'interested_in_all_genders' => true,
+        ]);
+        $candidate2Profile->genderIdentities()->sync([$generoFluido->id]);
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/matching/explore')
+            ->assertStatus(200);
+
+        $ids = collect($response->json('data'))->pluck('id');
+        expect($ids)->toContain((string) $candidate1->id, (string) $candidate2->id);
+    });
+
+    it('perfil sembrado "antes de la migración" (sin filas en el pivot, interested_in_all_genders backfillado a true) sigue apareciendo en el explorar', function () {
+        // createUserWithProfile() sin overrides == exactamente el estado
+        // post-backfill de un perfil preexistente: interested_in_all_genders
+        // true por default y ninguna fila en profile_interested_genders.
+        ['user' => $legacyCandidate] = createUserWithProfile();
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/matching/explore')
+            ->assertStatus(200);
+
+        $ids = collect($response->json('data'))->pluck('id');
+        expect($ids)->toContain((string) $legacyCandidate->id);
     });
 
 });

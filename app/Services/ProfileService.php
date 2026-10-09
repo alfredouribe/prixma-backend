@@ -25,6 +25,7 @@ class ProfileService
             'pronouns',
             'interests',
             'photos',
+            'interestedGenders',
         ])->firstOrFail();
 
         return [
@@ -63,6 +64,7 @@ class ProfileService
             'display_name', 'bio', 'city', 'latitude', 'longitude', 'intention',
             'custom_gender_identity', 'custom_orientation',
             'custom_pronouns', 'custom_interests',
+            'interested_in_all_genders',
         ];
 
         foreach ($scalarFields as $field) {
@@ -85,8 +87,11 @@ class ProfileService
         if (isset($data['interest_ids'])) {
             $profile->interests()->sync($data['interest_ids']);
         }
+        if (isset($data['interested_gender_identity_ids'])) {
+            $profile->interestedGenders()->sync($data['interested_gender_identity_ids']);
+        }
 
-        return $profile->load(['genderIdentities', 'orientations', 'pronouns', 'interests', 'photos']);
+        return $profile->load(['genderIdentities', 'orientations', 'pronouns', 'interests', 'photos', 'interestedGenders']);
     }
 
     public function addPhoto(User $user, UploadedFile $file): ProfilePhoto

@@ -285,6 +285,59 @@ describe('update', function () {
         ]);
     });
 
+    it('actualiza "a quién le gustaría conocer" y GET /profiles/me lo refleja correctamente (features/matching/specs/spec.md → "Compatibilidad de género")', function () {
+        $interested = GenderIdentity::where('slug', 'mujer-cis')->first();
+
+        $this->withToken($this->token)
+            ->putJson('/api/profiles/me', [
+                'interested_in_all_genders'      => false,
+                'interested_gender_identity_ids' => [$interested->id],
+            ])
+            ->assertStatus(200)
+            ->assertJsonPath('data.interested_in_all_genders', false);
+
+        $this->assertDatabaseHas('profiles', [
+            'user_id'                   => $this->user->id,
+            'interested_in_all_genders' => false,
+        ]);
+        $this->assertDatabaseHas('profile_interested_genders', [
+            'profile_id'         => $this->profile->id,
+            'gender_identity_id' => $interested->id,
+        ]);
+
+        // El GET /profiles/me (pantalla "Perfil → Editar") debe poder leer
+        // la selección actual para prefijar el formulario — sin esto, un
+        // guardado posterior que no vuelva a tocar este campo lo sobrescribe
+        // a su default (mismo bug ya documentado en CLAUDE.md para
+        // latitude/longitude en su momento).
+        $response = $this->withToken($this->token)
+            ->getJson('/api/profiles/me')
+            ->assertStatus(200)
+            ->assertJsonPath('data.interested_in_all_genders', false);
+
+        $labels = collect($response->json('data.interested_genders'))->pluck('label');
+        expect($labels)->toContain($interested->label);
+    });
+
+    it('GET /profiles/me retorna interested_in_all_genders false y la lista vacía cuando el perfil nunca configuró el campo', function () {
+        // El fixture de beforeEach crea el Profile vía Profile::create() SIN
+        // este campo, ya con la migración de interested_in_all_genders
+        // corrida (RefreshDatabase aplica todas las migraciones antes de
+        // cada test) — recibe el default de columna (`false`), no el
+        // backfill a `true` (ese solo aplica a filas que ya existían ANTES
+        // de que la migración corriera, ver
+        // 2026_10_03_000001_add_interested_in_all_genders_to_profiles_table).
+        // El caso "perfil retrocompatible ya existente" está cubierto en
+        // MatchingTest.php → describe('compatibilidad de género', ...).
+        $this->withToken($this->token)
+            ->getJson('/api/profiles/me')
+            ->assertStatus(200)
+            ->assertJsonPath('data.interested_in_all_genders', false);
+
+        expect($this->withToken($this->token)->getJson('/api/profiles/me')->json('data.interested_genders'))
+            ->toBe([]);
+    });
+
     it('permite limpiar la bio enviando null', function () {
         $this->withToken($this->token)
             ->putJson('/api/profiles/me', ['bio' => null])

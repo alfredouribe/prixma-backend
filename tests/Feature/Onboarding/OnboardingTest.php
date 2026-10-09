@@ -73,9 +73,10 @@ describe('stepIdentity', function () {
 
         $this->withToken($token)
             ->postJson('/api/onboarding/step/identity', [
-                'display_name'        => 'Alicia',
-                'gender_identity_ids' => [$identity->id],
-                'orientation_ids'     => [$orient->id],
+                'display_name'              => 'Alicia',
+                'gender_identity_ids'       => [$identity->id],
+                'orientation_ids'           => [$orient->id],
+                'interested_in_all_genders' => true,
             ])
             ->assertStatus(200)
             ->assertJsonPath('data.display_name', 'Alicia')
@@ -97,9 +98,10 @@ describe('stepIdentity', function () {
 
         $this->withToken($token)
             ->postJson('/api/onboarding/step/identity', [
-                'display_name'           => 'Alicia',
-                'custom_gender_identity' => 'Andrógine',
-                'custom_orientation'     => 'Graysexual',
+                'display_name'              => 'Alicia',
+                'custom_gender_identity'    => 'Andrógine',
+                'custom_orientation'        => 'Graysexual',
+                'interested_in_all_genders' => true,
             ])
             ->assertStatus(200)
             ->assertJsonPath('data.onboarding_step', 1);
@@ -112,8 +114,9 @@ describe('stepIdentity', function () {
 
         $this->withToken($token)
             ->postJson('/api/onboarding/step/identity', [
-                'display_name'    => 'Alicia',
-                'orientation_ids' => [$orient->id],
+                'display_name'              => 'Alicia',
+                'orientation_ids'           => [$orient->id],
+                'interested_in_all_genders' => true,
             ])
             ->assertStatus(422)
             ->assertJsonPath('errors.gender_identity_ids.0', 'Debes seleccionar al menos una identidad de género o describirte con tus propias palabras.');
@@ -126,8 +129,9 @@ describe('stepIdentity', function () {
 
         $this->withToken($token)
             ->postJson('/api/onboarding/step/identity', [
-                'display_name'        => 'Alicia',
-                'gender_identity_ids' => [$identity->id],
+                'display_name'              => 'Alicia',
+                'gender_identity_ids'       => [$identity->id],
+                'interested_in_all_genders' => true,
             ])
             ->assertStatus(422)
             ->assertJsonPath('errors.orientation_ids.0', 'Debes seleccionar al menos una orientación sexual o describirte con tus propias palabras.');
@@ -139,9 +143,10 @@ describe('stepIdentity', function () {
 
         $this->withToken($token)
             ->postJson('/api/onboarding/step/identity', [
-                'display_name'           => str_repeat('A', 51),
-                'custom_gender_identity' => 'Test',
-                'custom_orientation'     => 'Test',
+                'display_name'              => str_repeat('A', 51),
+                'custom_gender_identity'    => 'Test',
+                'custom_orientation'        => 'Test',
+                'interested_in_all_genders' => true,
             ])
             ->assertStatus(422);
     });
@@ -161,12 +166,60 @@ describe('stepIdentity', function () {
 
         $this->withToken($token)
             ->postJson('/api/onboarding/step/identity', [
-                'display_name'        => 'Nuevo nombre',
-                'gender_identity_ids' => [$identity->id],
-                'orientation_ids'     => [$orient->id],
+                'display_name'              => 'Nuevo nombre',
+                'gender_identity_ids'       => [$identity->id],
+                'orientation_ids'           => [$orient->id],
+                'interested_in_all_genders' => true,
             ])
             ->assertStatus(200)
             ->assertJsonPath('data.onboarding_step', 4);
+    });
+
+    it('falla si no se marca "Todes" ni ninguna identidad de a quién le gustaría conocer', function () {
+        $user     = User::factory()->create();
+        $token    = $user->createToken('mobile')->plainTextToken;
+        $identity = GenderIdentity::where('slug', 'no-binarie')->first();
+        $orient   = SexualOrientation::where('slug', 'bisexual')->first();
+
+        $this->withToken($token)
+            ->postJson('/api/onboarding/step/identity', [
+                'display_name'              => 'Alicia',
+                'gender_identity_ids'       => [$identity->id],
+                'orientation_ids'           => [$orient->id],
+                'interested_in_all_genders' => false,
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath(
+                'errors.interested_gender_identity_ids.0',
+                'Debes seleccionar "Todes / sin preferencia" o al menos una identidad de género de quienes te gustaría conocer.'
+            );
+    });
+
+    it('guarda "a quién le gustaría conocer" y lo sincroniza en el pivot', function () {
+        $user       = User::factory()->create();
+        $token      = $user->createToken('mobile')->plainTextToken;
+        $identity   = GenderIdentity::where('slug', 'no-binarie')->first();
+        $orient     = SexualOrientation::where('slug', 'bisexual')->first();
+        $interested = GenderIdentity::where('slug', 'mujer-cis')->first();
+
+        $this->withToken($token)
+            ->postJson('/api/onboarding/step/identity', [
+                'display_name'                   => 'Alicia',
+                'gender_identity_ids'             => [$identity->id],
+                'orientation_ids'                 => [$orient->id],
+                'interested_in_all_genders'        => false,
+                'interested_gender_identity_ids'   => [$interested->id],
+            ])
+            ->assertStatus(200);
+
+        $this->assertDatabaseHas('profiles', [
+            'user_id'                    => $user->id,
+            'interested_in_all_genders'  => false,
+        ]);
+
+        $this->assertDatabaseHas('profile_interested_genders', [
+            'gender_identity_id' => $interested->id,
+        ]);
     });
 
 });

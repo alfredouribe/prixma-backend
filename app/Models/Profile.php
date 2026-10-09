@@ -33,15 +33,17 @@ class Profile extends Model
         'longitude',
         'verification_status',
         'boosted_until',
+        'interested_in_all_genders',
     ];
 
     protected function casts(): array
     {
         return [
-            'video_processed'      => 'boolean',
-            'onboarding_step'      => 'integer',
-            'onboarding_completed' => 'boolean',
-            'boosted_until'        => 'datetime',
+            'video_processed'           => 'boolean',
+            'onboarding_step'           => 'integer',
+            'onboarding_completed'      => 'boolean',
+            'boosted_until'             => 'datetime',
+            'interested_in_all_genders' => 'boolean',
         ];
     }
 
@@ -58,6 +60,19 @@ class Profile extends Model
     public function genderIdentities()
     {
         return $this->belongsToMany(GenderIdentity::class, 'profile_gender_identities', 'profile_id', 'identity_id');
+    }
+
+    /**
+     * A quién le gustaría conocer este perfil, por identidad de género —
+     * independiente de genderIdentities() (que describe quién ES el
+     * perfil). Reusa el mismo catálogo `gender_identities`, pivot propio
+     * `profile_interested_genders` sin custom_value. Ver domain.md →
+     * ProfileInterestedGender y features/matching/specs/spec.md →
+     * "Compatibilidad de género".
+     */
+    public function interestedGenders()
+    {
+        return $this->belongsToMany(GenderIdentity::class, 'profile_interested_genders');
     }
 
     public function orientations()

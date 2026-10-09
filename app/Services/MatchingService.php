@@ -71,6 +71,41 @@ class MatchingService
             $query->whereIn('profiles.intention', ['friendship', 'community', 'mentorship']);
         }
 
+        // Compatibilidad de género — exclusión dura y mutua, mismo nivel de
+        // prioridad que la separación de intenciones de arriba: no depende
+        // de user_matching_preferences, el usuario no puede desactivarla.
+        // Ver spec.md/plan.md → "Compatibilidad de género".
+        //
+        // 1. Lo que el candidato debe cumplir para que A (el viewer) lo vea:
+        //    su identidad de género debe intersectar lo que A marcó en "a
+        //    quién le gustaría conocer", salvo que A sea "Todes".
+        if (!$user->profile->interested_in_all_genders) {
+            $interestedSlugs = $user->profile->interestedGenders()->pluck('gender_identities.slug');
+
+            $query->whereHas('profile.genderIdentities', function ($q) use ($interestedSlugs) {
+                $q->whereIn('gender_identities.slug', $interestedSlugs);
+            });
+        }
+
+        // 2. Mutuo: el candidato también debe tener a A dentro de lo que ÉL
+        //    marcó (o el candidato es "Todes"). Sin esto, A vería gente que
+        //    no lo busca. Las dos condiciones (bloque 1 arriba y este) usan
+        //    whereHas/orWhereHas sobre relaciones distintas que comparten la
+        //    tabla `gender_identities` como destino (genderIdentities vía
+        //    pivot profile_gender_identities, interestedGenders vía pivot
+        //    profile_interested_genders) — cada whereHas genera su propia
+        //    subquery EXISTS correlacionada de forma independiente, así que
+        //    no hay join ambiguo entre ellas (verificado corriendo el query
+        //    real contra MySQL, ver tests de esta sección).
+        $viewerGenderSlugs = $user->profile->genderIdentities()->pluck('gender_identities.slug');
+
+        $query->where(function ($q) use ($viewerGenderSlugs) {
+            $q->where('profiles.interested_in_all_genders', true)
+              ->orWhereHas('profile.interestedGenders', function ($q2) use ($viewerGenderSlugs) {
+                  $q2->whereIn('gender_identities.slug', $viewerGenderSlugs);
+              });
+        });
+
         // Age filter
         $minDob = Carbon::now()->subYears($prefs->age_max)->startOfDay();
         $maxDob = Carbon::now()->subYears($prefs->age_min)->endOfDay();
