@@ -10,10 +10,13 @@ use App\Mail\VerifyEmailMail;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
 class AuthService
 {
+    public function __construct(private readonly PackageService $packageService) {}
+
     // Corto a propósito porque es un código de 6 dígitos que se teclea a
     // mano (no un link de 60 caracteres) — mismo criterio que cualquier OTP;
     // la ruta ya está bajo `throttle:auth` (5 intentos/min/IP) así que un
@@ -38,6 +41,19 @@ class AuthService
         $token = $user->createToken('mobile')->plainTextToken;
 
         Mail::to($user->email)->queue(new VerifyEmailMail($user));
+
+        // Best-effort: un fallo aquí (ej. `PlatformSetting::current()` no
+        // pudo leer/crear la fila) nunca debe romper el registro de la
+        // cuenta — mismo criterio ya usado en el proyecto para
+        // notificaciones no críticas.
+        try {
+            $this->packageService->grantWelcomeTrialIfEnabled($user);
+        } catch (\Throwable $e) {
+            Log::error('No se pudo otorgar el trial de bienvenida al registrar la cuenta.', [
+                'user_id' => $user->id,
+                'exception' => $e->getMessage(),
+            ]);
+        }
 
         return ['user' => $user, 'token' => $token];
     }

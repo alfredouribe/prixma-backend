@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Models\PlatformSetting;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
 use Filament\Forms\Form;
@@ -49,6 +50,7 @@ class PlatformSettings extends Page implements HasForms
             'free_likes_per_day' => $settings->free_likes_per_day,
             'free_chat_minutes_before_ad' => $settings->free_chat_minutes_before_ad,
             'chat_ad_video_key' => $settings->chat_ad_video_key,
+            'new_account_premium_trial_enabled' => $settings->new_account_premium_trial_enabled,
         ]);
     }
 
@@ -82,6 +84,11 @@ class PlatformSettings extends Page implements HasForms
                     ->acceptedFileTypes(['video/mp4', 'video/quicktime'])
                     ->maxSize(51200)
                     ->nullable()
+                    ->columnSpanFull(),
+
+                Toggle::make('new_account_premium_trial_enabled')
+                    ->label('Premium de bienvenida para cuentas nuevas')
+                    ->helperText('Mientras esté activado, toda cuenta nueva recibe 30 días de Prixma+ automáticamente al registrarse; apagarlo no quita el beneficio a quien ya lo recibió, solo detiene nuevos otorgamientos.')
                     ->columnSpanFull(),
             ])
             ->statePath('data');

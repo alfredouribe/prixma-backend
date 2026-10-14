@@ -1,6 +1,8 @@
 <?php
 
 use App\Mail\PasswordResetCodeMail;
+use App\Models\PackageGrant;
+use App\Models\PlatformSetting;
 use App\Models\User;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -104,6 +106,72 @@ describe('registro', function () {
             'privacy_accepted'      => false,
         ])->assertStatus(422)
             ->assertJsonPath('errors.privacy_accepted.0', 'Debes aceptar la Política de Privacidad.');
+    });
+
+    // -----------------------------------------------------------------------
+    // Trial de bienvenida (Prixma+ 30 días en cuentas nuevas) — switch global
+    // `platform_settings.new_account_premium_trial_enabled`
+    // -----------------------------------------------------------------------
+
+    it('otorga Prixma+ de 30 días y registra el PackageGrant cuando el switch está activado', function () {
+        PlatformSetting::current()->update(['new_account_premium_trial_enabled' => true]);
+
+        $this->postJson('/api/auth/register', [
+            'email'                 => 'trial@example.com',
+            'password'              => 'password123',
+            'password_confirmation' => 'password123',
+            'date_of_birth'         => '1990-05-15',
+            'terms_accepted'        => true,
+            'privacy_accepted'      => true,
+        ])->assertStatus(201);
+
+        $user = User::where('email', 'trial@example.com')->first();
+
+        expect($user->premium_until)->not->toBeNull();
+        expect($user->premium_until->diffInDays(now(), true))->toBeGreaterThan(28)
+            ->and($user->premium_until->diffInDays(now(), true))->toBeLessThan(31);
+
+        $this->assertDatabaseHas('package_grants', [
+            'user_id'      => $user->id,
+            'package_id'   => null,
+            'admin_id'     => null,
+            'package_name' => 'Premium de bienvenida (cuenta nueva)',
+            'grant_type'   => 'premium_days',
+            'grant_value'  => 30,
+        ]);
+    });
+
+    it('no otorga ningún beneficio ni crea PackageGrant cuando el switch está apagado (default)', function () {
+        $this->postJson('/api/auth/register', [
+            'email'                 => 'sintrial@example.com',
+            'password'              => 'password123',
+            'password_confirmation' => 'password123',
+            'date_of_birth'         => '1990-05-15',
+            'terms_accepted'        => true,
+            'privacy_accepted'      => true,
+        ])->assertStatus(201);
+
+        $user = User::where('email', 'sintrial@example.com')->first();
+
+        expect($user->premium_until)->toBeNull();
+        expect(PackageGrant::where('user_id', $user->id)->exists())->toBeFalse();
+    });
+
+    it('hasPremiumAccess() es true inmediatamente tras el registro cuando el switch está activado', function () {
+        PlatformSetting::current()->update(['new_account_premium_trial_enabled' => true]);
+
+        $this->postJson('/api/auth/register', [
+            'email'                 => 'gate@example.com',
+            'password'              => 'password123',
+            'password_confirmation' => 'password123',
+            'date_of_birth'         => '1990-05-15',
+            'terms_accepted'        => true,
+            'privacy_accepted'      => true,
+        ])->assertStatus(201);
+
+        $user = User::where('email', 'gate@example.com')->first();
+
+        expect($user->hasPremiumAccess())->toBeTrue();
     });
 
 });

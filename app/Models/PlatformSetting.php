@@ -20,6 +20,7 @@ class PlatformSetting extends Model
         'free_likes_per_day',
         'free_chat_minutes_before_ad',
         'chat_ad_video_key',
+        'new_account_premium_trial_enabled',
     ];
 
     protected function casts(): array
@@ -28,6 +29,7 @@ class PlatformSetting extends Model
             'free_swipes_per_ad' => 'integer',
             'free_likes_per_day' => 'integer',
             'free_chat_minutes_before_ad' => 'integer',
+            'new_account_premium_trial_enabled' => 'boolean',
         ];
     }
 
@@ -52,6 +54,7 @@ class PlatformSetting extends Model
             'free_swipes_per_ad' => 5,
             'free_likes_per_day' => 5,
             'free_chat_minutes_before_ad' => 1,
+            'new_account_premium_trial_enabled' => false,
         ]);
     }
 

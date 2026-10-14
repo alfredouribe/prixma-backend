@@ -80,6 +80,36 @@ it('guarda los 3 números nuevos', function () {
     expect($settings->free_chat_minutes_before_ad)->toBe(3);
 });
 
+it('activa/desactiva el trial de Premium de bienvenida para cuentas nuevas', function () {
+    $admin = Admin::factory()->create(['role' => 'admin']);
+
+    $this->actingAs($admin, 'admin');
+
+    Livewire::test(PlatformSettings::class)
+        ->fillForm([
+            'free_swipes_per_ad' => 5,
+            'free_likes_per_day' => 5,
+            'free_chat_minutes_before_ad' => 1,
+            'new_account_premium_trial_enabled' => true,
+        ])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect(PlatformSetting::current()->fresh()->new_account_premium_trial_enabled)->toBeTrue();
+
+    Livewire::test(PlatformSettings::class)
+        ->fillForm([
+            'free_swipes_per_ad' => 5,
+            'free_likes_per_day' => 5,
+            'free_chat_minutes_before_ad' => 1,
+            'new_account_premium_trial_enabled' => false,
+        ])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect(PlatformSetting::current()->fresh()->new_account_premium_trial_enabled)->toBeFalse();
+});
+
 it('sube el video del anuncio de chat al disco s3, sin ACL público', function () {
     Storage::fake('s3');
     $admin = Admin::factory()->create(['role' => 'admin']);
