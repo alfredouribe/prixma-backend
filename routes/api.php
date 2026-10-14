@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\Auth\AuthController;
 use App\Http\Controllers\Api\Chat\ConversationController;
 use App\Http\Controllers\Api\Chat\MessageController;
 use App\Http\Controllers\Api\Events\EventController;
+use App\Http\Controllers\Api\Feedback\FeedbackController;
 use App\Http\Controllers\Api\Matching\MatchingController;
 use App\Http\Controllers\Api\Notifications\NotificationController;
 use App\Http\Controllers\Api\Onboarding\OnboardingController;
@@ -127,6 +128,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/geo-blocks', [SafetyController::class, 'storeGeoBlock']);
         Route::delete('/geo-blocks/{uuid}', [SafetyController::class, 'destroyGeoBlock']);
     });
+
+    Route::post('/feedback', [FeedbackController::class, 'store']);
 
     Route::prefix('notifications')->group(function () {
         Route::get('/', [NotificationController::class, 'index']);

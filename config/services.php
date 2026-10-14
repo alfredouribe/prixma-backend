@@ -60,4 +60,15 @@ return [
         'webhook_secret' => env('REVENUECAT_WEBHOOK_SECRET'),
     ],
 
+    /*
+    | Feedback dentro de la app (reporte de bug / comentario libre) — ver
+    | CLAUDE.md (pedido nuevo, sin spec previa). Dirección que recibe el
+    | correo de notificación de cada envío; configurable vía `.env` con un
+    | default sensato, mismo patrón ya usado para `expo.access_token`/
+    | `revenuecat.webhook_secret`.
+    */
+    'feedback' => [
+        'notify_email' => env('FEEDBACK_NOTIFICATION_EMAIL', 'alfred@prixma.site'),
+    ],
+
 ];

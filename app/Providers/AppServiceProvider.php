@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Models\Admin;
 use App\Models\Event;
+use App\Models\Feedback;
 use App\Models\Package;
 use App\Models\PackageGrant;
 use App\Models\Report;
@@ -12,6 +13,7 @@ use App\Models\VerificationRequest;
 use App\Observers\VerificationRequestObserver;
 use App\Policies\AdminPolicy;
 use App\Policies\EventPolicy;
+use App\Policies\FeedbackPolicy;
 use App\Policies\PackageGrantPolicy;
 use App\Policies\PackagePolicy;
 use App\Policies\ReportPolicy;
@@ -40,6 +42,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(Event::class, EventPolicy::class);
         Gate::policy(Package::class, PackagePolicy::class);
         Gate::policy(PackageGrant::class, PackageGrantPolicy::class);
+        Gate::policy(Feedback::class, FeedbackPolicy::class);
 
         RateLimiter::for('auth', function (Request $request) {
             return Limit::perMinute(5)->by($request->ip());
