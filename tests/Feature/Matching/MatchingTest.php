@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 
 use App\Jobs\SendMatchNotification;
 use App\Jobs\SendSuperLikeNotification;
@@ -91,6 +91,7 @@ describe('explore', function () {
 
         ['profile' => $candidateProfile] = createUserWithProfile([
             'bio' => 'Amante del café y las plantas',
+            'verification_status' => 'verified',
         ]);
         $candidateProfile->genderIdentities()->attach($genderIdentity->id);
         $candidateProfile->orientations()->attach($orientation->id);
@@ -134,9 +135,11 @@ describe('explore', function () {
 
         ['user' => $candidate1, 'profile' => $profile1] = createUserWithProfile([
             'display_name' => 'Candidata Uno',
+            'verification_status' => 'verified',
         ]);
         ['user' => $candidate2, 'profile' => $profile2] = createUserWithProfile([
             'display_name' => 'Candidata Dos',
+            'verification_status' => 'verified',
         ]);
 
         $response = $this->withToken($this->token)
@@ -166,6 +169,7 @@ describe('explore', function () {
         // de forma perezosa, que es justo el camino que disparaba el bug.
         ['user' => $candidate] = createUserWithProfile([
             'display_name' => 'Candidata Nueva',
+            'verification_status' => 'verified',
         ]);
 
         expect(\App\Models\UserMatchingPreference::where('user_id', $this->user->id)->exists())->toBeFalse();
@@ -192,15 +196,19 @@ describe('explore', function () {
     it('un candidato con boosted_until vigente aparece primero en la cola real, aunque tenga peor score en todo lo demás', function () {
         // El boosteado no comparte intención con el viewer (community vs.
         // friendship del viewer, así que no suma el bono de +20 por
-        // coincidencia) y no está verificado — sin el bono de boost,
-        // quedaría por debajo del candidato "normal" de abajo. `intention`
-        // no puede ser null: getExploreQueue() excluye del query a quien no
-        // tenga una de las intenciones compartidas del viewer (aquí
-        // friendship/community/mentorship), antes de llegar al scoring.
+        // coincidencia) — sin el bono de boost, quedaría por debajo del
+        // candidato "normal" de abajo. `intention` no puede ser null:
+        // getExploreQueue() excluye del query a quien no tenga una de las
+        // intenciones compartidas del viewer (aquí friendship/community/
+        // mentorship), antes de llegar al scoring. Ambos candidatos deben
+        // estar `verified` — perfiles sin verificar ya ni siquiera entran al
+        // query desde 2026-10-18 (exclusión dura, ver "Perfiles verificados"
+        // en getExploreQueue()), así que `unverified` aquí los sacaría del
+        // todo en vez de solo quitarles el bono de +5.
         ['profile' => $boostedProfile] = createUserWithProfile([
             'display_name' => 'Perfil Boosteado',
             'intention' => 'community',
-            'verification_status' => 'unverified',
+            'verification_status' => 'verified',
         ]);
         $boostedProfile->update(['boosted_until' => now()->addMinutes(30)]);
 
@@ -252,7 +260,7 @@ describe('explore', function () {
         ['user' => $incognito] = createUserWithProfile();
         UserSetting::create(['user_id' => $incognito->id, 'incognito_mode_enabled' => true]);
 
-        ['user' => $visible] = createUserWithProfile();
+        ['user' => $visible] = createUserWithProfile(['verification_status' => 'verified']);
 
         $response = $this->withToken($this->token)
             ->getJson('/api/matching/explore')
@@ -265,7 +273,7 @@ describe('explore', function () {
 
     it('el propio modo incógnito no afecta lo que el usuario ve en su explorar', function () {
         UserSetting::create(['user_id' => $this->user->id, 'incognito_mode_enabled' => true]);
-        ['user' => $visible] = createUserWithProfile();
+        ['user' => $visible] = createUserWithProfile(['verification_status' => 'verified']);
 
         $response = $this->withToken($this->token)
             ->getJson('/api/matching/explore')
@@ -325,7 +333,7 @@ describe('explore', function () {
             'intention' => 'partner',
             'verification_status' => 'verified',
         ]);
-        ['user' => $partnerCandidate] = createUserWithProfile(['intention' => 'partner']);
+        ['user' => $partnerCandidate] = createUserWithProfile(['intention' => 'partner', 'verification_status' => 'verified']);
         ['user' => $friendshipCandidate] = createUserWithProfile(['intention' => 'friendship']);
         ['user' => $communityCandidate] = createUserWithProfile(['intention' => 'community']);
         ['user' => $mentorshipCandidate] = createUserWithProfile(['intention' => 'mentorship']);
@@ -348,9 +356,9 @@ describe('explore', function () {
             'intention' => 'friendship',
             'verification_status' => 'verified',
         ]);
-        ['user' => $communityCandidate] = createUserWithProfile(['intention' => 'community']);
-        ['user' => $mentorshipCandidate] = createUserWithProfile(['intention' => 'mentorship']);
-        ['user' => $partnerCandidate] = createUserWithProfile(['intention' => 'partner']);
+        ['user' => $communityCandidate] = createUserWithProfile(['intention' => 'community', 'verification_status' => 'verified']);
+        ['user' => $mentorshipCandidate] = createUserWithProfile(['intention' => 'mentorship', 'verification_status' => 'verified']);
+        ['user' => $partnerCandidate] = createUserWithProfile(['intention' => 'partner', 'verification_status' => 'verified']);
 
         $response = $this->withToken($friendshipToken)
             ->getJson('/api/matching/explore')
@@ -430,11 +438,13 @@ describe('compatibilidad de género', function () {
 
         ['user' => $candidate1, 'profile' => $candidate1Profile] = createUserWithProfile([
             'interested_in_all_genders' => true,
+            'verification_status' => 'verified',
         ]);
         $candidate1Profile->genderIdentities()->sync([$hombreCis->id]);
 
         ['user' => $candidate2, 'profile' => $candidate2Profile] = createUserWithProfile([
             'interested_in_all_genders' => true,
+            'verification_status' => 'verified',
         ]);
         $candidate2Profile->genderIdentities()->sync([$generoFluido->id]);
 
@@ -450,7 +460,7 @@ describe('compatibilidad de género', function () {
         // createUserWithProfile() sin overrides == exactamente el estado
         // post-backfill de un perfil preexistente: interested_in_all_genders
         // true por default y ninguna fila en profile_interested_genders.
-        ['user' => $legacyCandidate] = createUserWithProfile();
+        ['user' => $legacyCandidate] = createUserWithProfile(['verification_status' => 'verified']);
 
         $response = $this->withToken($this->token)
             ->getJson('/api/matching/explore')
@@ -469,7 +479,7 @@ describe('compatibilidad de género', function () {
 describe('swipe', function () {
 
     it('registra un like sin crear match cuando no hay like inverso', function () {
-        ['user' => $target] = createUserWithProfile();
+        ['user' => $target] = createUserWithProfile(['verification_status' => 'verified']);
 
         $this->withToken($this->token)
             ->postJson('/api/matching/swipe', [
@@ -489,7 +499,7 @@ describe('swipe', function () {
     });
 
     it('crea match cuando hay like mutuo', function () {
-        ['user' => $target] = createUserWithProfile();
+        ['user' => $target] = createUserWithProfile(['verification_status' => 'verified']);
 
         // Target already liked viewer
         Swipe::create([
@@ -513,7 +523,7 @@ describe('swipe', function () {
     });
 
     it('no crea match con dislike aunque exista like inverso', function () {
-        ['user' => $target] = createUserWithProfile();
+        ['user' => $target] = createUserWithProfile(['verification_status' => 'verified']);
 
         Swipe::create([
             'swiper_id' => $target->id,
@@ -533,7 +543,7 @@ describe('swipe', function () {
     });
 
     it('rechaza swipe duplicado al mismo usuario', function () {
-        ['user' => $target] = createUserWithProfile();
+        ['user' => $target] = createUserWithProfile(['verification_status' => 'verified']);
 
         Swipe::create([
             'swiper_id' => $this->user->id,
@@ -559,7 +569,7 @@ describe('swipe', function () {
     });
 
     it('crea match con super_like mutuo', function () {
-        ['user' => $target] = createUserWithProfile();
+        ['user' => $target] = createUserWithProfile(['verification_status' => 'verified']);
 
         Swipe::create([
             'swiper_id' => $target->id,
@@ -577,7 +587,7 @@ describe('swipe', function () {
     });
 
     it('crea conversación automáticamente al hacer match', function () {
-        ['user' => $target] = createUserWithProfile();
+        ['user' => $target] = createUserWithProfile(['verification_status' => 'verified']);
 
         Swipe::create([
             'swiper_id' => $target->id,
@@ -610,7 +620,7 @@ describe('swipe', function () {
 
     it('despacha SendMatchNotification al hacer match', function () {
         Queue::fake();
-        ['user' => $target] = createUserWithProfile();
+        ['user' => $target] = createUserWithProfile(['verification_status' => 'verified']);
 
         Swipe::create([
             'swiper_id' => $target->id,
@@ -630,7 +640,7 @@ describe('swipe', function () {
 
     it('no despacha SendMatchNotification si el swipe no produjo match', function () {
         Queue::fake();
-        ['user' => $target] = createUserWithProfile();
+        ['user' => $target] = createUserWithProfile(['verification_status' => 'verified']);
 
         $this->withToken($this->token)
             ->postJson('/api/matching/swipe', [
@@ -645,7 +655,7 @@ describe('swipe', function () {
 
     it('despacha SendSuperLikeNotification cuando direction es super_like', function () {
         Queue::fake();
-        ['user' => $target] = createUserWithProfile();
+        ['user' => $target] = createUserWithProfile(['verification_status' => 'verified']);
 
         $this->withToken($this->token)
             ->postJson('/api/matching/swipe', [
@@ -659,7 +669,7 @@ describe('swipe', function () {
 
     it('no despacha SendSuperLikeNotification con un like normal', function () {
         Queue::fake();
-        ['user' => $target] = createUserWithProfile();
+        ['user' => $target] = createUserWithProfile(['verification_status' => 'verified']);
 
         $this->withToken($this->token)
             ->postJson('/api/matching/swipe', [
@@ -684,13 +694,13 @@ describe('límite de likes/día', function () {
         $settings->update(['free_likes_per_day' => 2]);
 
         for ($i = 0; $i < 2; $i++) {
-            ['user' => $target] = createUserWithProfile();
+            ['user' => $target] = createUserWithProfile(['verification_status' => 'verified']);
             $this->withToken($this->token)
                 ->postJson('/api/matching/swipe', ['swiped_id' => $target->id, 'direction' => 'like'])
                 ->assertStatus(200);
         }
 
-        ['user' => $thirdTarget] = createUserWithProfile();
+        ['user' => $thirdTarget] = createUserWithProfile(['verification_status' => 'verified']);
 
         $this->withToken($this->token)
             ->postJson('/api/matching/swipe', ['swiped_id' => $thirdTarget->id, 'direction' => 'like'])
@@ -707,7 +717,7 @@ describe('límite de likes/día', function () {
         $this->user->update(['is_premium' => true]);
 
         for ($i = 0; $i < 3; $i++) {
-            ['user' => $target] = createUserWithProfile();
+            ['user' => $target] = createUserWithProfile(['verification_status' => 'verified']);
             $this->withToken($this->token)
                 ->postJson('/api/matching/swipe', ['swiped_id' => $target->id, 'direction' => 'like'])
                 ->assertStatus(200);
@@ -719,7 +729,7 @@ describe('límite de likes/día', function () {
         $this->user->update(['is_premium' => false, 'premium_until' => now()->addDays(3)]);
 
         for ($i = 0; $i < 3; $i++) {
-            ['user' => $target] = createUserWithProfile();
+            ['user' => $target] = createUserWithProfile(['verification_status' => 'verified']);
             $this->withToken($this->token)
                 ->postJson('/api/matching/swipe', ['swiped_id' => $target->id, 'direction' => 'like'])
                 ->assertStatus(200);
@@ -732,7 +742,7 @@ describe('límite de likes/día', function () {
         \App\Models\Subscription::factory()->for($this->user)->create(['status' => 'active']);
 
         for ($i = 0; $i < 3; $i++) {
-            ['user' => $target] = createUserWithProfile();
+            ['user' => $target] = createUserWithProfile(['verification_status' => 'verified']);
             $this->withToken($this->token)
                 ->postJson('/api/matching/swipe', ['swiped_id' => $target->id, 'direction' => 'like'])
                 ->assertStatus(200);
@@ -743,13 +753,13 @@ describe('límite de likes/día', function () {
         PlatformSetting::current()->update(['free_likes_per_day' => 1]);
 
         for ($i = 0; $i < 5; $i++) {
-            ['user' => $target] = createUserWithProfile();
+            ['user' => $target] = createUserWithProfile(['verification_status' => 'verified']);
             $this->withToken($this->token)
                 ->postJson('/api/matching/swipe', ['swiped_id' => $target->id, 'direction' => 'dislike'])
                 ->assertStatus(200);
         }
 
-        ['user' => $likeTarget] = createUserWithProfile();
+        ['user' => $likeTarget] = createUserWithProfile(['verification_status' => 'verified']);
         $this->withToken($this->token)
             ->postJson('/api/matching/swipe', ['swiped_id' => $likeTarget->id, 'direction' => 'like'])
             ->assertStatus(200);
@@ -759,13 +769,13 @@ describe('límite de likes/día', function () {
         PlatformSetting::current()->update(['free_likes_per_day' => 3]);
 
         for ($i = 0; $i < 3; $i++) {
-            ['user' => $target] = createUserWithProfile();
+            ['user' => $target] = createUserWithProfile(['verification_status' => 'verified']);
             $this->withToken($this->token)
                 ->postJson('/api/matching/swipe', ['swiped_id' => $target->id, 'direction' => 'like'])
                 ->assertStatus(200);
         }
 
-        ['user' => $fourthTarget] = createUserWithProfile();
+        ['user' => $fourthTarget] = createUserWithProfile(['verification_status' => 'verified']);
         $this->withToken($this->token)
             ->postJson('/api/matching/swipe', ['swiped_id' => $fourthTarget->id, 'direction' => 'like'])
             ->assertStatus(429);
@@ -787,7 +797,7 @@ describe('límite de likes/día', function () {
         $yesterdaySwipe->created_at = now()->subDay();
         $yesterdaySwipe->save();
 
-        ['user' => $todayTarget] = createUserWithProfile();
+        ['user' => $todayTarget] = createUserWithProfile(['verification_status' => 'verified']);
         $this->withToken($this->token)
             ->postJson('/api/matching/swipe', ['swiped_id' => $todayTarget->id, 'direction' => 'like'])
             ->assertStatus(200);
@@ -805,12 +815,12 @@ describe('super likes extra', function () {
         PlatformSetting::current()->update(['free_likes_per_day' => 1]);
         $this->user->update(['extra_super_likes' => 2]);
 
-        ['user' => $firstTarget] = createUserWithProfile();
+        ['user' => $firstTarget] = createUserWithProfile(['verification_status' => 'verified']);
         $this->withToken($this->token)
             ->postJson('/api/matching/swipe', ['swiped_id' => $firstTarget->id, 'direction' => 'like'])
             ->assertStatus(200);
 
-        ['user' => $secondTarget] = createUserWithProfile();
+        ['user' => $secondTarget] = createUserWithProfile(['verification_status' => 'verified']);
         $this->withToken($this->token)
             ->postJson('/api/matching/swipe', ['swiped_id' => $secondTarget->id, 'direction' => 'super_like'])
             ->assertStatus(200);
@@ -827,12 +837,12 @@ describe('super likes extra', function () {
         PlatformSetting::current()->update(['free_likes_per_day' => 1]);
         $this->user->update(['extra_super_likes' => 2]);
 
-        ['user' => $firstTarget] = createUserWithProfile();
+        ['user' => $firstTarget] = createUserWithProfile(['verification_status' => 'verified']);
         $this->withToken($this->token)
             ->postJson('/api/matching/swipe', ['swiped_id' => $firstTarget->id, 'direction' => 'like'])
             ->assertStatus(200);
 
-        ['user' => $secondTarget] = createUserWithProfile();
+        ['user' => $secondTarget] = createUserWithProfile(['verification_status' => 'verified']);
         $this->withToken($this->token)
             ->postJson('/api/matching/swipe', ['swiped_id' => $secondTarget->id, 'direction' => 'like'])
             ->assertStatus(429);
@@ -844,12 +854,12 @@ describe('super likes extra', function () {
         PlatformSetting::current()->update(['free_likes_per_day' => 1]);
         $this->user->update(['extra_super_likes' => 0]);
 
-        ['user' => $firstTarget] = createUserWithProfile();
+        ['user' => $firstTarget] = createUserWithProfile(['verification_status' => 'verified']);
         $this->withToken($this->token)
             ->postJson('/api/matching/swipe', ['swiped_id' => $firstTarget->id, 'direction' => 'like'])
             ->assertStatus(200);
 
-        ['user' => $secondTarget] = createUserWithProfile();
+        ['user' => $secondTarget] = createUserWithProfile(['verification_status' => 'verified']);
         $this->withToken($this->token)
             ->postJson('/api/matching/swipe', ['swiped_id' => $secondTarget->id, 'direction' => 'super_like'])
             ->assertStatus(429);
@@ -865,7 +875,7 @@ describe('super likes extra', function () {
         $this->user->update(['is_premium' => true, 'extra_super_likes' => 2]);
 
         for ($i = 0; $i < 3; $i++) {
-            ['user' => $target] = createUserWithProfile();
+            ['user' => $target] = createUserWithProfile(['verification_status' => 'verified']);
             $this->withToken($this->token)
                 ->postJson('/api/matching/swipe', ['swiped_id' => $target->id, 'direction' => 'super_like'])
                 ->assertStatus(200);
@@ -1315,6 +1325,56 @@ describe('gate de verificación', function () {
             ])
             ->assertStatus(403)
             ->assertJsonPath('message', 'Solo los perfiles verificados pueden explorar y dar like.');
+    });
+
+    it('explore nunca devuelve un candidato sin verificar, incluso si verified_only está en false', function () {
+        // Antes de 2026-10-18, verified_only era el único control de este
+        // filtro — un viewer con verified_only=false SÍ veía perfiles sin
+        // verificar. Ahora la exclusión es dura e incondicional: este test
+        // prueba explícitamente que apagar la preferencia (que sigue
+        // existiendo, solo quedó vestigial) no trae de vuelta el
+        // comportamiento viejo.
+        \App\Models\UserMatchingPreference::create([
+            'user_id' => $this->user->id,
+            'verified_only' => false,
+        ]);
+
+        ['user' => $unverifiedCandidate] = createUserWithProfile([
+            'verification_status' => 'unverified',
+        ]);
+        ['user' => $pendingCandidate] = createUserWithProfile([
+            'verification_status' => 'pending',
+        ]);
+        ['user' => $verifiedCandidate] = createUserWithProfile([
+            'verification_status' => 'verified',
+        ]);
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/matching/explore')
+            ->assertStatus(200);
+
+        $ids = collect($response->json('data'))->pluck('id');
+        expect($ids)->not->toContain((string) $unverifiedCandidate->id, (string) $pendingCandidate->id);
+        expect($ids)->toContain((string) $verifiedCandidate->id);
+    });
+
+    it('swipe directo contra un swiped_id sin verificar es rechazado con 400, aunque el actor sí esté verificado', function () {
+        ['user' => $unverifiedTarget] = createUserWithProfile([
+            'verification_status' => 'unverified',
+        ]);
+
+        $this->withToken($this->token)
+            ->postJson('/api/matching/swipe', [
+                'swiped_id' => $unverifiedTarget->id,
+                'direction' => 'like',
+            ])
+            ->assertStatus(400)
+            ->assertJsonPath('message', 'No es posible interactuar con este perfil en este momento.');
+
+        $this->assertDatabaseMissing('swipes', [
+            'swiper_id' => $this->user->id,
+            'swiped_id' => $unverifiedTarget->id,
+        ]);
     });
 
 });

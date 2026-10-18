@@ -116,10 +116,18 @@ class MatchingService
             $query->whereIn('profiles.intention', $prefs->intentions);
         }
 
-        // Verified only filter
-        if ($prefs->verified_only) {
-            $query->where('profiles.verification_status', 'verified');
-        }
+        // Perfiles verificados — exclusión dura, mismo nivel de prioridad que
+        // la separación de intenciones y la compatibilidad de género de
+        // arriba: no depende de `user_matching_preferences`, el usuario no
+        // puede desactivarla. Antes era el toggle opcional "Solo perfiles
+        // verificados" (`$prefs->verified_only`) — pedido real del humano
+        // 2026-10-18: nadie debe aparecer en el explorar de nadie hasta que
+        // su identidad fue verificada por el equipo, sin importar lo que el
+        // viewer haya configurado. `$prefs->verified_only` queda sin uso
+        // aquí (el campo/toggle sigue existiendo en `user_matching_preferences`
+        // y en el frontend, ahora redundante — señalado, no removido en este
+        // cambio).
+        $query->where('profiles.verification_status', 'verified');
 
         // Video only filter
         if ($prefs->has_video_only) {
@@ -167,6 +175,21 @@ class MatchingService
     {
         if ($user->profile->verification_status !== 'verified') {
             throw new AuthorizationException('Solo los perfiles verificados pueden explorar y dar like.');
+        }
+
+        // Defensa en profundidad: getExploreQueue() ya nunca devuelve
+        // candidatos sin verificar (ver bloque "Perfiles verificados" ahí),
+        // pero esto confirma lo mismo del lado de swipe() por si alguien
+        // llama al endpoint directo con un id que nunca debió haber visto
+        // (sesión con datos obsoletos, llamada directa a la API, etc.) —
+        // pedido real del humano 2026-10-18: nadie debe ser alcanzable hasta
+        // que su identidad fue verificada, no solo "no aparecer en la lista".
+        $swipedVerification = User::where('users.id', $swipedId)
+            ->join('profiles', 'profiles.user_id', '=', 'users.id')
+            ->value('profiles.verification_status');
+
+        if ($swipedVerification !== 'verified') {
+            throw new BusinessException('No es posible interactuar con este perfil en este momento.');
         }
 
         // Límite diario de likes/super_likes para usuarios sin Prixma+ — ver
