@@ -51,6 +51,19 @@ class AuthController extends Controller
         return new UserResource($request->user());
     }
 
+    /**
+     * Elimina (soft-delete) la cuenta del usuario autenticado — ver
+     * `AuthService::deleteAccount()` para el detalle completo de qué borra.
+     * Sin Form Request: no hay body que validar, el usuario a eliminar es
+     * siempre `$request->user()`, nunca un parámetro de ruta.
+     */
+    public function destroy(Request $request): Response
+    {
+        $this->authService->deleteAccount($request->user());
+
+        return response()->noContent();
+    }
+
     public function forgotPassword(ForgotPasswordRequest $request): JsonResponse
     {
         $this->authService->forgotPassword($request->validated('email'));

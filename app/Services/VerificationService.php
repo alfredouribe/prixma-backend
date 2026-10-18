@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Exceptions\BusinessException;
 use App\Models\Admin;
+use App\Models\Profile;
 use App\Models\User;
 use App\Models\VerificationRequest;
 use Illuminate\Http\UploadedFile;
@@ -117,6 +118,24 @@ class VerificationService
         if ($directory !== '' && $directory !== '.' && $disk->exists($directory) && empty($disk->allFiles($directory))) {
             $disk->deleteDirectory($directory);
         }
+    }
+
+    /**
+     * Borra, si siguen en disco, los archivos de TODAS las
+     * VerificationRequest del perfil — llamado por
+     * `AuthService::deleteAccount()` al eliminar la cuenta. A diferencia del
+     * soft-delete del `User`, los binarios en disco SÍ deben desaparecer de
+     * verdad. En la práctica, a lo sumo la solicitud más reciente suele
+     * tener archivos pendientes de borrar (`approve()`/`reject()` ya
+     * limpian las anteriores al revisarlas), pero se recorren todas por
+     * seguridad explícita — reusa `deleteStoredFiles()`, que ya es
+     * idempotente (valida `exists()` antes de borrar cada archivo).
+     */
+    public function deleteAllFilesForProfile(Profile $profile): void
+    {
+        $profile->verificationRequests->each(
+            fn (VerificationRequest $verificationRequest) => $this->deleteStoredFiles($verificationRequest)
+        );
     }
 
     /**

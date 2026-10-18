@@ -36,6 +36,7 @@ Route::prefix('auth')->middleware('throttle:auth')->group(function () {
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me', [AuthController::class, 'me']);
+    Route::delete('/auth/me', [AuthController::class, 'destroy']);
 
     // Autorización de canales privados/presence de Reverb (laravel-echo) para
     // clientes Sanctum stateless. No usar Broadcast::routes() — esa registra

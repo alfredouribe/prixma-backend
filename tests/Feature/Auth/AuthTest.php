@@ -1,13 +1,18 @@
 <?php
 
 use App\Mail\PasswordResetCodeMail;
+use App\Models\DeviceToken;
 use App\Models\PackageGrant;
 use App\Models\PlatformSetting;
+use App\Models\Profile;
 use App\Models\User;
+use App\Models\VerificationRequest;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 
@@ -407,6 +412,151 @@ describe('rate limiting', function () {
             'password' => 'wrongpassword',
         ])->assertStatus(429)
             ->assertJsonPath('message', 'Demasiados intentos. Espera un momento e intenta de nuevo.');
+    });
+
+});
+
+// ---------------------------------------------------------------------------
+// Eliminar cuenta — DELETE /api/auth/me
+// ---------------------------------------------------------------------------
+// Google Play exige una forma real de eliminar la cuenta desde la app; ver
+// AuthService::deleteAccount() para el detalle completo de qué hace y en
+// qué orden. domain.md → User: "No se puede eliminar físicamente — soft
+// delete siempre" — por eso el primer test confirma explícitamente que el
+// registro sigue en la tabla (no asertamos solo con assertSoftDeleted para
+// dejar esa garantía inequívoca).
+// ---------------------------------------------------------------------------
+
+describe('eliminar cuenta', function () {
+
+    it('hace soft-delete real: el registro sigue en la tabla pero deleted_at ya no es null', function () {
+        $user  = User::factory()->withCompletedOnboarding()->create();
+        $token = $user->createToken('mobile')->plainTextToken;
+
+        $this->withToken($token)
+            ->deleteJson('/api/auth/me')
+            ->assertStatus(204);
+
+        $row = DB::table('users')->where('id', $user->id)->first();
+
+        expect($row)->not->toBeNull()
+            ->and($row->deleted_at)->not->toBeNull();
+
+        // El scope global de SoftDeletes ya lo excluye de cualquier query
+        // normal (Explorar, Chat, Matches, etc. usan User::query()/
+        // relaciones sin withTrashed(), sin necesitar ningún cambio) —
+        // confirmado aquí con la forma más simple posible.
+        expect(User::find($user->id))->toBeNull();
+    });
+
+    it('revoca todos los tokens Sanctum: una request posterior con el token viejo da 401', function () {
+        $user  = User::factory()->withCompletedOnboarding()->create();
+        $token = $user->createToken('mobile')->plainTextToken;
+        $user->createToken('device-2');
+
+        expect($user->tokens()->count())->toBe(2);
+
+        $this->withToken($token)
+            ->deleteJson('/api/auth/me')
+            ->assertStatus(204);
+
+        expect($user->tokens()->count())->toBe(0);
+
+        // app('auth')->forgetGuards() es necesario aquí porque ya hicimos
+        // una request autenticada antes (el DELETE) en este mismo test: el
+        // guard de Sanctum cachea el usuario resuelto en memoria durante
+        // todo el proceso de test (el contenedor no se reinicia entre
+        // llamadas HTTP dentro de un mismo test, a diferencia de producción,
+        // donde cada request es un proceso/contenedor nuevo) — sin esto, la
+        // segunda llamada reutilizaría el usuario ya resuelto en vez de
+        // re-autenticar con el token (ya inválido). /api/auth/me no depende
+        // de que exista un Profile (a diferencia de /api/profiles/me) —
+        // aísla la aserción a lo único que nos importa aquí: que el token
+        // viejo ya no autentica.
+        app('auth')->forgetGuards();
+
+        $this->withToken($token)
+            ->getJson('/api/auth/me')
+            ->assertUnauthorized();
+    });
+
+    it('borra los device_tokens del usuario', function () {
+        $user  = User::factory()->withCompletedOnboarding()->create();
+        $token = $user->createToken('mobile')->plainTextToken;
+
+        DeviceToken::factory()->for($user)->create();
+        DeviceToken::factory()->for($user)->create();
+
+        expect(DB::table('device_tokens')->where('user_id', $user->id)->count())->toBe(2);
+
+        $this->withToken($token)
+            ->deleteJson('/api/auth/me')
+            ->assertStatus(204);
+
+        expect(DB::table('device_tokens')->where('user_id', $user->id)->count())->toBe(0);
+    });
+
+    it('intenta borrar los archivos de S3 asociados: fotos de perfil, video y thumbnail', function () {
+        Storage::fake('s3');
+
+        $user  = User::factory()->withCompletedOnboarding()->create();
+        $token = $user->createToken('mobile')->plainTextToken;
+
+        $profile = Profile::factory()->for($user)->create([
+            'video_url'           => 'videos/profiles/' . $user->id . '/video.mp4',
+            'video_thumbnail_url' => 'videos/thumbnails/' . $user->id . '/thumb.jpg',
+        ]);
+
+        Storage::disk('s3')->put($profile->video_url, 'contenido de video');
+        Storage::disk('s3')->put($profile->video_thumbnail_url, 'contenido de thumbnail');
+
+        $photo = $profile->photos()->create([
+            'url'      => 'https://cdn.example.com/photo1.jpg',
+            'key'      => 'photos/profiles/' . $user->id . '/photo1.jpg',
+            'position' => 1,
+        ]);
+        Storage::disk('s3')->put($photo->key, 'contenido de foto');
+
+        $this->withToken($token)
+            ->deleteJson('/api/auth/me')
+            ->assertStatus(204);
+
+        Storage::disk('s3')->assertMissing($photo->key);
+        Storage::disk('s3')->assertMissing($profile->video_url);
+        Storage::disk('s3')->assertMissing($profile->video_thumbnail_url);
+    });
+
+    it('intenta borrar el documento/selfie de verificación del disco local si siguen pendientes', function () {
+        Storage::fake('local');
+
+        $user  = User::factory()->withCompletedOnboarding()->create();
+        $token = $user->createToken('mobile')->plainTextToken;
+
+        $profile = Profile::factory()->for($user)->create();
+
+        $documentPath = 'verification/' . $profile->id . '/' . (string) Str::uuid() . '/document.jpg';
+        $selfiePath   = 'verification/' . $profile->id . '/' . (string) Str::uuid() . '/selfie.jpg';
+
+        Storage::disk('local')->put($documentPath, 'contenido de documento');
+        Storage::disk('local')->put($selfiePath, 'contenido de selfie');
+
+        VerificationRequest::create([
+            'profile_id'    => $profile->id,
+            'document_path' => $documentPath,
+            'selfie_path'   => $selfiePath,
+            'status'        => 'pending',
+        ]);
+
+        $this->withToken($token)
+            ->deleteJson('/api/auth/me')
+            ->assertStatus(204);
+
+        Storage::disk('local')->assertMissing($documentPath);
+        Storage::disk('local')->assertMissing($selfiePath);
+    });
+
+    it('request sin autenticación retorna 401', function () {
+        $this->deleteJson('/api/auth/me')->assertUnauthorized();
     });
 
 });

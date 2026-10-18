@@ -12,10 +12,14 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 
 class AuthService
 {
-    public function __construct(private readonly PackageService $packageService) {}
+    public function __construct(
+        private readonly PackageService $packageService,
+        private readonly VerificationService $verificationService,
+    ) {}
 
     // Corto a propósito porque es un código de 6 dígitos que se teclea a
     // mano (no un link de 60 caracteres) — mismo criterio que cualquier OTP;
@@ -154,5 +158,71 @@ class AuthService
         // De un solo uso — mismo criterio que el broker de Laravel que
         // reemplaza este flujo.
         DB::table('password_reset_tokens')->where('email', $data['email'])->delete();
+    }
+
+    /**
+     * Elimina la cuenta a solicitud del propio usuario (Google Play exige
+     * una forma real de hacerlo; ver `../legal/aviso-de-privacidad.md` línea
+     * 103, que ya lo prometía sin que existiera todavía). `domain.md` →
+     * `User`: "No se puede eliminar físicamente — soft delete siempre", así
+     * que el registro nunca se borra de verdad (`$user->delete()` usa el
+     * trait `SoftDeletes` ya aplicado). Los binarios en S3/disco local sí
+     * deben desaparecer de verdad — no hay razón de negocio ni legal para
+     * retenerlos tras una eliminación solicitada por el usuario, a
+     * diferencia del registro mismo.
+     *
+     * Orden (dentro de una única transacción — si cualquier paso falla,
+     * nada queda a medias; los borrados de S3/disco local no son
+     * transaccionales por naturaleza, pero no lanzan si el archivo ya no
+     * existe, así que no bloquean el rollback):
+     * 1. Revoca todos los tokens Sanctum (mismo patrón que
+     *    `SafetyService::banReportedUser()`) — una sesión activa deja de
+     *    servir de inmediato, no solo en el siguiente login.
+     * 2. Borra los archivos reales en S3: fotos de perfil (cada
+     *    `ProfilePhoto.key`), video de presentación procesado y su
+     *    thumbnail (`profile.video_url`/`video_thumbnail_url` — pese al
+     *    nombre, `video_url` guarda la key de S3, no una URL, ver
+     *    `ProfileService::saveVideo()`/`ProcessProfileVideo`), y el
+     *    documento/selfie de verificación si siguen en el disco local
+     *    (`VerificationService::deleteAllFilesForProfile()` — normalmente
+     *    solo quedan si la última solicitud nunca fue aprobada/rechazada).
+     * 3. Borra los `device_tokens` del usuario (hard delete real, no tiene
+     *    sentido retener tokens de push de una cuenta eliminada).
+     * 4. Soft-delete del `User` — lo saca de cualquier query normal del
+     *    resto de la app (Explorar, Chat, Matches, etc. ya usan
+     *    `User::query()`/relaciones sin `withTrashed()`, sin necesitar
+     *    cambios). No se soft-eliminan `Profile` ni el resto de tablas
+     *    relacionadas a propósito: casi todo acceso pasa por `User`
+     *    primero, y el soft-delete de `User` ya los vuelve inalcanzables en
+     *    la práctica.
+     *
+     * No borra mensajes ni conversaciones con otros usuarios — mismo
+     * criterio que cuando alguien bloquea a otro
+     * (`SafetyService::blockUser()`): el historial del otro lado se queda
+     * intacto.
+     */
+    public function deleteAccount(User $user): void
+    {
+        DB::transaction(function () use ($user) {
+            $user->tokens()->delete();
+
+            $profile = $user->profile;
+
+            if ($profile) {
+                $profile->photos->each(
+                    fn ($photo) => Storage::disk('s3')->delete($photo->key)
+                );
+
+                foreach (array_filter([$profile->video_url, $profile->video_thumbnail_url]) as $videoKey) {
+                    Storage::disk('s3')->delete($videoKey);
+                }
+
+                $this->verificationService->deleteAllFilesForProfile($profile);
+            }
+
+            $user->deviceTokens()->delete();
+
+            $user->delete();
+        });
     }
 }
