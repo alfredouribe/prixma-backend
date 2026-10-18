@@ -11,6 +11,10 @@ Route::get('/eliminar-cuenta', function () {
     return view('account-deletion');
 });
 
+Route::get('/seguridad-infantil', function () {
+    return view('child-safety-standards');
+});
+
 Route::get('/email/verify/{id}/{hash}', [AuthController::class, 'verifyEmail'])
     ->middleware('signed')
     ->name('email.verify');
