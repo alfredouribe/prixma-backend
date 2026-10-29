@@ -2,6 +2,7 @@
 
 use App\Filament\Resources\UserResource\Pages\ListUsers;
 use App\Filament\Resources\UserResource\Pages\ViewUser;
+use App\Filament\Resources\UserResource\RelationManagers\PhotosRelationManager;
 use App\Models\Admin;
 use App\Models\Package;
 use App\Models\PackageGrant;
@@ -9,6 +10,7 @@ use App\Models\Profile;
 use App\Models\Report;
 use App\Models\User;
 use App\Models\UserMatch;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 
@@ -489,6 +491,183 @@ it('el detalle muestra el estado vacío cuando el usuario no tiene historial de 
 });
 
 // ---------------------------------------------------------------------------
+// Banear directo sin reporte (features/profile/specs/plan.md → "Banear
+// usuario / eliminar cuenta / eliminar foto desde el panel") — cuarta
+// excepción al "solo lectura" de este recurso. A diferencia de
+// ReportResource\Pages\ViewReport::banUser (que saca el motivo del `reason`
+// del reporte), aquí no existe ningún Report: el motivo lo escribe el staff
+// a mano en el formulario embebido de la acción. Delega en
+// SafetyService::banUser() standalone, ya probado a nivel de Service en
+// tests/Feature/Safety/SafetyTest.php — aquí solo se cubre el wiring de
+// Filament.
+// ---------------------------------------------------------------------------
+
+it('banea directo a un usuario sin que exista ningún reporte, con el motivo que escribe el staff', function () {
+    Mail::fake();
+
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create(['status' => 'active']);
+    $user->createToken('device-1');
+    $user->createToken('device-2');
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ListUsers::class)
+        ->callTableAction('banUser', $user, data: [
+            'reason' => 'Comportamiento abusivo reportado por varios usuarios fuera de la app',
+        ]);
+
+    expect($user->fresh()->status)->toBe('banned')
+        ->and($user->tokens()->count())->toBe(0)
+        ->and(Report::count())->toBe(0);
+
+    Mail::assertQueued(\App\Mail\UserBannedMail::class, function ($mail) use ($user) {
+        return $mail->hasTo($user->email)
+            && $mail->reasonLabel === 'Comportamiento abusivo reportado por varios usuarios fuera de la app';
+    });
+});
+
+it('el motivo es requerido para banear directo', function () {
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create(['status' => 'active']);
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ListUsers::class)
+        ->callTableAction('banUser', $user, data: ['reason' => ''])
+        ->assertHasTableActionErrors(['reason' => 'required']);
+
+    expect($user->fresh()->status)->toBe('active');
+});
+
+it('la acción de banear directo no está visible para un usuario ya baneado', function () {
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create(['status' => 'banned']);
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ListUsers::class)
+        ->assertTableActionHidden('banUser', $user);
+});
+
+it('un superadmin también puede banear directo', function () {
+    Mail::fake();
+
+    $superadmin = Admin::factory()->superadmin()->create();
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create(['status' => 'active']);
+
+    $this->actingAs($superadmin, 'admin');
+
+    Livewire::test(ListUsers::class)
+        ->callTableAction('banUser', $user, data: ['reason' => 'Motivo de prueba']);
+
+    expect($user->fresh()->status)->toBe('banned');
+});
+
+// ---------------------------------------------------------------------------
+// Eliminar cuenta (features/profile/specs/plan.md) — acción irreversible,
+// deliberadamente solo disponible en el header del detalle (ViewUser), no
+// como fila de la tabla — ver docblock de
+// ViewUser::getHeaderActions()/deleteAccount para la justificación completa.
+// Delega en AuthService::deleteAccount(), ya probado a nivel de Service en
+// tests/Feature/Auth/* — aquí solo se cubre el wiring de Filament y que el
+// usuario soft-eliminado desaparece del listado del Resource.
+// ---------------------------------------------------------------------------
+
+it('elimina la cuenta de un usuario desde el detalle: queda soft-eliminado y desaparece del listado', function () {
+    Storage::fake('s3');
+
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create();
+    $user->profile->photos()->create([
+        'url' => 'https://cdn.prixma.app/photos/foto-a-borrar.jpg',
+        'key' => 'photos/foto-a-borrar.jpg',
+        'position' => 0,
+    ]);
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ViewUser::class, ['record' => $user->id])
+        ->callAction('deleteAccount');
+
+    expect(User::find($user->id))->toBeNull()
+        ->and(User::withTrashed()->find($user->id)->trashed())->toBeTrue();
+
+    Livewire::test(ListUsers::class)
+        ->assertCanNotSeeTableRecords([$user]);
+});
+
+it('un superadmin también puede eliminar la cuenta de un usuario', function () {
+    Storage::fake('s3');
+
+    $superadmin = Admin::factory()->superadmin()->create();
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create();
+
+    $this->actingAs($superadmin, 'admin');
+
+    Livewire::test(ViewUser::class, ['record' => $user->id])
+        ->callAction('deleteAccount');
+
+    expect(User::find($user->id))->toBeNull();
+});
+
+// ---------------------------------------------------------------------------
+// Eliminar foto específica (features/profile/specs/plan.md) —
+// RelationManager nuevo sobre `User::photos()` (hasManyThrough vía Profile,
+// agregado solo para esto). Delega en ProfileService::deletePhoto(), ya
+// probado a nivel de Service en tests/Feature/Profile/* — aquí solo se
+// cubre el wiring de Filament: la foto elegida desaparece, las demás no se
+// tocan.
+// ---------------------------------------------------------------------------
+
+it('elimina una foto puntual del perfil del usuario sin afectar las demás', function () {
+    Storage::fake('s3');
+
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create();
+    $photoToDelete = $user->profile->photos()->create([
+        'url' => 'https://cdn.prixma.app/photos/foto-a-borrar-unica.jpg',
+        'key' => 'photos/foto-a-borrar-unica.jpg',
+        'position' => 0,
+    ]);
+    $photoToKeep = $user->profile->photos()->create([
+        'url' => 'https://cdn.prixma.app/photos/foto-que-se-queda-unica.jpg',
+        'key' => 'photos/foto-que-se-queda-unica.jpg',
+        'position' => 1,
+    ]);
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(PhotosRelationManager::class, [
+        'ownerRecord' => $user,
+        'pageClass' => ViewUser::class,
+    ])
+        ->assertCanSeeTableRecords([$photoToDelete, $photoToKeep])
+        ->callTableAction('deletePhoto', $photoToDelete);
+
+    $user->profile->refresh();
+
+    expect($user->profile->photos()->find($photoToDelete->id))->toBeNull()
+        ->and($user->profile->photos()->find($photoToKeep->id))->not->toBeNull();
+});
+
+it('un superadmin también puede eliminar una foto puntual', function () {
+    Storage::fake('s3');
+
+    $superadmin = Admin::factory()->superadmin()->create();
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create();
+    $photo = $user->profile->photos()->create([
+        'url' => 'https://cdn.prixma.app/photos/foto-superadmin-unica.jpg',
+        'key' => 'photos/foto-superadmin-unica.jpg',
+        'position' => 0,
+    ]);
+
+    $this->actingAs($superadmin, 'admin');
+
+    Livewire::test(PhotosRelationManager::class, [
+        'ownerRecord' => $user,
+        'pageClass' => ViewUser::class,
+    ])->callTableAction('deletePhoto', $photo);
+
+    expect($user->profile->photos()->find($photo->id))->toBeNull();
+});
+
+// ---------------------------------------------------------------------------
 // Autorización
 // ---------------------------------------------------------------------------
 
@@ -512,4 +691,25 @@ it('un usuario final autenticado con el guard por defecto no puede acceder al li
 
 it('sin autenticar, el listado de usuarios redirige al login del panel', function () {
     $this->get('/admin/users')->assertRedirect();
+});
+
+/**
+ * Cobertura explícita de guard para las 3 acciones nuevas (banUser,
+ * deleteAccount, eliminar foto): ninguna vive en una ruta propia — banUser
+ * es una Tables\Actions\Action sobre la misma página de listado,
+ * deleteAccount un header action del detalle, y "eliminar foto" un
+ * RelationManager montado dentro del detalle. Si el guard `web` no puede
+ * llegar ni al listado (ya probado arriba) ni al detalle (probado aquí),
+ * estructuralmente no puede disparar ninguna de las 3 — mismo criterio de
+ * cobertura ya usado en el resto de este archivo y en todos los demás
+ * ResourceTest.php del proyecto (ningún recurso prueba autorización
+ * acción-por-acción, solo a nivel de ruta).
+ */
+it('un usuario final autenticado con el guard por defecto no puede acceder al detalle de un usuario (donde vive "Eliminar cuenta")', function () {
+    $endUser = User::factory()->withCompletedOnboarding()->create();
+    $target = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create();
+
+    $this->actingAs($endUser) // guard 'web', nunca 'admin'
+        ->get("/admin/users/{$target->id}")
+        ->assertRedirect(); // nunca 200
 });

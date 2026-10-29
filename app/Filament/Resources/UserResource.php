@@ -3,11 +3,13 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\UserResource\Pages;
+use App\Filament\Resources\UserResource\RelationManagers\PhotosRelationManager;
 use App\Models\Package;
 use App\Models\User;
 use App\Services\PackageService;
 use App\Services\SafetyService;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Form;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
@@ -171,6 +173,37 @@ class UserResource extends Resource
                 // el Package elegido y llama al Service, ninguna lógica de
                 // negocio vive aquí (constitution.md → "No business logic in
                 // the panel").
+                // Cuarta excepción al "solo lectura" de este recurso (ver
+                // comentario en form() arriba) — banear directo sin que
+                // exista un Report previo (a diferencia de
+                // ReportResource\Pages\ViewReport::banUser, que saca el
+                // motivo del `reason` del reporte, aquí no hay reporte así
+                // que el motivo lo escribe el staff a mano). Delega por
+                // completo en SafetyService::banUser() (standalone, sin
+                // depender de ningún Report) — ninguna lógica de negocio
+                // vive aquí.
+                Tables\Actions\Action::make('banUser')
+                    ->label('Banear usuario')
+                    ->icon('heroicon-o-no-symbol')
+                    ->color('danger')
+                    ->requiresConfirmation()
+                    ->modalDescription('¿Confirmas que quieres banear a este usuario? Su cuenta quedará deshabilitada de inmediato (no podrá iniciar sesión ni seguir usando una sesión activa) y se le enviará un correo notificándole el motivo que escribas abajo. Esta acción se puede revertir después con "Quitar ban".')
+                    ->visible(fn (User $record): bool => $record->status !== 'banned')
+                    ->form([
+                        Textarea::make('reason')
+                            ->label('Motivo')
+                            ->required()
+                            ->maxLength(300),
+                    ])
+                    ->action(function (User $record, array $data): void {
+                        app(SafetyService::class)->banUser($record, $data['reason']);
+
+                        Notification::make()
+                            ->title('Usuario baneado')
+                            ->success()
+                            ->send();
+                    }),
+
                 Tables\Actions\Action::make('grantPackage')
                     ->label('Otorgar paquete')
                     ->icon('heroicon-o-gift')
@@ -202,6 +235,24 @@ class UserResource extends Resource
         return [
             'index' => Pages\ListUsers::route('/'),
             'view' => Pages\ViewUser::route('/{record}'),
+        ];
+    }
+
+    /**
+     * Permite borrar una foto puntual del perfil del usuario desde el detalle
+     * (ver features/profile/specs/plan.md → "Eliminar foto específica") — un
+     * Infolist (la sección "Fotos" de ViewUser) es de solo lectura por
+     * diseño en Filament, no soporta una Action por fila; un RelationManager
+     * sí es una Table real con soporte completo de Actions por fila, el
+     * patrón idiomático de Filament 3 para esto. La sección de solo lectura
+     * de ViewUser se deja intacta (complementa, no reemplaza) — sigue
+     * sirviendo como vista rápida sin tabs, y no rompe los tests ya
+     * existentes que la cubren.
+     */
+    public static function getRelations(): array
+    {
+        return [
+            PhotosRelationManager::class,
         ];
     }
 

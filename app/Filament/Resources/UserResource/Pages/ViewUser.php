@@ -9,7 +9,9 @@ use App\Models\PackageGrant;
 use App\Models\Report;
 use App\Models\User;
 use App\Models\UserMatch;
+use App\Services\AuthService;
 use App\Services\MatchingService;
+use Filament\Actions;
 use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\ImageEntry;
 use Filament\Infolists\Components\RepeatableEntry;
@@ -17,6 +19,7 @@ use Filament\Infolists\Components\Section;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Infolists\Components\ViewEntry;
 use Filament\Infolists\Infolist;
+use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Illuminate\Support\Facades\Storage;
 
@@ -367,6 +370,43 @@ class ViewUser extends ViewRecord
                             ->visible(blank($packageGrantRows)),
                     ]),
             ]);
+    }
+
+    /**
+     * "Eliminar cuenta" vive SOLO aquí (header de detalle), no como fila de
+     * la tabla en `UserResource::table()` como `banUser`/`unban`/
+     * `togglePremium`/`grantPackage` — decisión deliberada, no un olvido.
+     * Es más grave e irreversible que banear (no existe ningún "deshacer",
+     * a diferencia de `unban`), así que se exige que el staff abra el
+     * detalle completo del usuario primero — donde ya vio reportes, fotos y
+     * matches antes de decidir — en vez de poder dispararla con un solo
+     * click desde la fila de una tabla paginada. Mismo criterio que
+     * `ReportResource\Pages\ViewReport::banUser` (la acción más grave de
+     * ese recurso también vive solo en el header del detalle, no en la
+     * tabla de reportes).
+     */
+    protected function getHeaderActions(): array
+    {
+        return [
+            Actions\Action::make('deleteAccount')
+                ->label('Eliminar cuenta')
+                ->color('danger')
+                ->icon('heroicon-o-trash')
+                ->requiresConfirmation()
+                ->modalHeading('Eliminar cuenta de usuario')
+                ->modalDescription('Esta acción es DEFINITIVA y no se puede deshacer — a diferencia de un ban, no existe ninguna forma de revertirla desde el panel. Se eliminará la cuenta (soft-delete), se borrarán sus fotos, video y documentos de verificación de S3, se revocarán todas sus sesiones activas, y desaparecerá de este listado en cuanto confirmes. Úsala solo para casos graves.')
+                ->modalSubmitActionLabel('Sí, eliminar definitivamente')
+                ->action(function (User $record) {
+                    app(AuthService::class)->deleteAccount($record);
+
+                    Notification::make()
+                        ->title('Cuenta eliminada')
+                        ->success()
+                        ->send();
+
+                    return redirect(UserResource::getUrl('index'));
+                }),
+        ];
     }
 
     /**

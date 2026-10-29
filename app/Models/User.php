@@ -115,6 +115,30 @@ class User extends Authenticatable
     }
 
     /**
+     * Fotos del perfil, vía `hasManyThrough` (profiles.user_id →
+     * profile_photos.profile_id). Existe solo para que
+     * `UserResource\RelationManagers\PhotosRelationManager` (panel admin,
+     * "Eliminar foto específica" — ver features/profile/specs/plan.md)
+     * tenga una relación real de Eloquent que nombrar: un RelationManager
+     * de Filament exige un método de relación en el modelo "owner" (`User`
+     * en este caso), pero las fotos realmente cuelgan de `Profile`
+     * (`user -> profile -> photos`), no directo de `User`. No se usa en
+     * ningún otro lugar del código — el resto del dominio sigue navegando
+     * por `$user->profile->photos()` como siempre.
+     */
+    public function photos()
+    {
+        return $this->hasManyThrough(
+            ProfilePhoto::class,
+            Profile::class,
+            'user_id', // FK en profiles que referencia a users
+            'profile_id', // FK en profile_photos que referencia a profiles
+            'id', // PK local en users
+            'id', // PK local en profiles
+        );
+    }
+
+    /**
      * Historial inmutable de paquetes otorgados a este usuario (log, no
      * afecta el estado de perks — eso vive en las columnas
      * premium_until/see_likers_until/rewind_credits/extra_super_likes y en

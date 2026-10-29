@@ -352,6 +352,58 @@ describe('banReportedUser / unbanUser (SafetyService)', function () {
 });
 
 // ---------------------------------------------------------------------------
+// SafetyService::banUser() — ban directo sin Report previo (2026-10-23, ver
+// features/safety/specs/plan.md → "Banear sin reporte previo / eliminar
+// cuenta desde el panel"). Extraído de banReportedUser() para que el panel
+// admin pueda banear desde UserResource (ej. staff revisa fotos de un
+// usuario y encuentra algo ilícito sin que nadie lo haya reportado), sin
+// necesitar ningún Report de por medio.
+// ---------------------------------------------------------------------------
+
+describe('banUser (SafetyService) — sin Report previo', function () {
+
+    it('banea a un usuario sin ningún Report de por medio: status=banned, revoca tokens, encola el correo con el motivo correcto', function () {
+        \Illuminate\Support\Facades\Mail::fake();
+
+        ['user' => $target] = createSafetyUser();
+        // createSafetyUser() ya emite un token ('mobile') al crear el
+        // usuario — se agrega uno más para simular un segundo dispositivo
+        // con sesión activa.
+        $target->createToken('device-1');
+        expect($target->tokens()->count())->toBe(2);
+
+        $result = app(SafetyService::class)->banUser($target, 'Contenido ilícito');
+
+        expect($result->status)->toBe('banned')
+            ->and($target->fresh()->status)->toBe('banned')
+            ->and($target->tokens()->count())->toBe(0);
+
+        expect(Report::count())->toBe(0);
+
+        \Illuminate\Support\Facades\Mail::assertQueued(\App\Mail\UserBannedMail::class, function ($mail) use ($target) {
+            return $mail->hasTo($target->email) && $mail->reasonLabel === 'Contenido ilícito';
+        });
+    });
+
+    it('un usuario baneado directo (sin Report) ya no puede iniciar sesión, ni siquiera con el token que ya tenía', function () {
+        ['user' => $target] = createSafetyUser();
+        $oldToken = $target->createToken('device-1')->plainTextToken;
+
+        app(SafetyService::class)->banUser($target, 'Contenido ilícito');
+
+        $this->postJson('/api/auth/login', [
+            'email'    => $target->email,
+            'password' => 'password',
+        ])->assertStatus(403);
+
+        $this->withToken($oldToken)
+            ->getJson('/api/profiles/me')
+            ->assertUnauthorized();
+    });
+
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/safety/blocks — bidireccionalidad + integración con Matching
 // ---------------------------------------------------------------------------
 

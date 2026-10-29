@@ -11,9 +11,16 @@ use App\Models\User;
  * `UserPolicy` en el proyecto antes de este cambio (confirmado por búsqueda
  * previa a crear este archivo).
  *
- * Alcance confirmado con el humano — solo lectura por ahora, sin acciones de
- * suspender/banear/editar (esas se planean en una sesión futura aparte, ver
- * features/profile/specs/plan.md → "Panel admin — gestión de usuarios").
+ * El recurso en sí (form()/getEloquentQuery()) sigue siendo de solo lectura
+ * — sin create/update genérico — pero desde 2026-10-23 tiene varias
+ * excepciones puntuales de mutación (togglePremium, unban, grantPackage,
+ * banUser, deleteAccount, eliminar foto puntual), todas acciones de
+ * Filament dedicadas y confirmadas, no un formulario de edición general.
+ * Ninguna de esas acciones llama a `update()`/`delete()` de esta policy —
+ * se autorizan solo por `viewAny`/`view` (llegar al recurso ya basta, mismo
+ * patrón que togglePremium/unban/grantPackage desde que existen). `update`/
+ * `delete` se mantienen en `false` a propósito: no hay ningún formulario de
+ * edición ni un `DeleteAction` genérico sobre `User` en este panel.
  */
 class UserPolicy
 {

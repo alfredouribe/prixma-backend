@@ -172,39 +172,54 @@ class SafetyService
     }
 
     /**
-     * Sanción real sobre el usuario reportado — decisión confirmada con el
+     * Sanción real sobre cualquier usuario — decisión confirmada con el
      * humano 2026-08-03, ver features/safety/specs/plan.md → "Banear desde
-     * un reporte". A diferencia de `markReportAsResolved()` (que no aplica
-     * ninguna sanción), esto sí actúa sobre la cuenta:
+     * un reporte". Extraído de `banReportedUser()` (2026-10-23) para que el
+     * panel admin también pueda banear directo desde `UserResource` (fotos
+     * del perfil, etc.) sin que exista un `Report` previo — ver
+     * features/safety/specs/plan.md → "Banear sin reporte previo / eliminar
+     * cuenta desde el panel".
      * 1. `users.status = 'banned'` — ya bloqueaba el login (`AuthService`),
      *    pero no invalidaba una sesión ya activa; se revocan también todos
      *    sus tokens de Sanctum para que el bloqueo sea inmediato, no solo en
      *    el siguiente intento de login.
-     * 2. El reporte que originó el ban se marca `resolved` — banear es en sí
-     *    la resolución más fuerte posible, no tiene sentido dejarlo abierto.
-     * 3. Correo al usuario (fuera de la transacción, best-effort — mismo
+     * 2. Correo al usuario (fuera de la transacción, best-effort — mismo
      *    criterio que las notificaciones de Matching/Chat: un fallo en el
      *    envío nunca debe revertir un ban ya aplicado).
      *
      * `$reasonLabel` ya viene resuelto por el llamador (`ReportResource::
-     * reasonLabels()`) — el Service no depende de una clase de Filament
-     * (capa de presentación).
+     * reasonLabels()` o el equivalente de `UserResource`) — el Service no
+     * depende de ninguna clase de Filament (capa de presentación).
      */
-    public function banReportedUser(Report $report, string $reasonLabel): Report
+    public function banUser(User $user, string $reasonLabel): User
     {
-        $report = DB::transaction(function () use ($report) {
-            $user = $report->reported;
+        $user = DB::transaction(function () use ($user) {
             $user->update(['status' => 'banned']);
             $user->tokens()->delete();
 
-            $report->update(['status' => 'resolved']);
-
-            return $report->fresh();
+            return $user->fresh();
         });
 
-        Mail::to($report->reported->email)->queue(new UserBannedMail($report->reported, $reasonLabel));
+        Mail::to($user->email)->queue(new UserBannedMail($user, $reasonLabel));
 
-        return $report;
+        return $user;
+    }
+
+    /**
+     * Banea al usuario reportado (`banUser()`) y, además, marca el reporte
+     * que originó el ban como `resolved` — banear es en sí la resolución más
+     * fuerte posible, no tiene sentido dejarlo abierto. Sigue siendo el
+     * único punto de entrada para `ReportResource::banUser` (ver
+     * `ReportResourceTest.php`); el comportamiento de cara a ese llamador no
+     * cambió con el refactor de 2026-10-23.
+     */
+    public function banReportedUser(Report $report, string $reasonLabel): Report
+    {
+        $this->banUser($report->reported, $reasonLabel);
+
+        $report->update(['status' => 'resolved']);
+
+        return $report->fresh();
     }
 
     /**
