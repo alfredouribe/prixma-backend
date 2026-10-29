@@ -333,6 +333,49 @@ it('un superadmin también puede quitar el ban', function () {
 });
 
 // ---------------------------------------------------------------------------
+// Reiniciar verificación (pedido del humano: "al listado de usuario podemos
+// agregarle una opción para eliminar su verificación para probar volver a
+// subir la identificación?") — quinta excepción al "solo lectura" de este
+// recurso, mismo patrón que togglePremium/unban/banUser. Delega en
+// VerificationService::resetVerification() — aquí solo se cubre el wiring de
+// Filament (el cambio de estado, y que la acción se oculta correctamente).
+// ---------------------------------------------------------------------------
+
+it('reinicia la verificación de un usuario verificado a "unverified"', function () {
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory()->verified())->create();
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ListUsers::class)
+        ->callTableAction('resetVerification', $user);
+
+    expect($user->fresh()->profile->verification_status)->toBe('unverified');
+});
+
+it('la acción de reiniciar verificación no está visible para un usuario ya sin verificar', function () {
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory())->create();
+
+    expect($user->profile->verification_status)->toBe('unverified');
+
+    $this->actingAs($this->admin, 'admin');
+
+    Livewire::test(ListUsers::class)
+        ->assertTableActionHidden('resetVerification', $user);
+});
+
+it('un superadmin también puede reiniciar la verificación', function () {
+    $superadmin = Admin::factory()->superadmin()->create();
+    $user = User::factory()->withCompletedOnboarding()->has(Profile::factory()->verified())->create();
+
+    $this->actingAs($superadmin, 'admin');
+
+    Livewire::test(ListUsers::class)
+        ->callTableAction('resetVerification', $user);
+
+    expect($user->fresh()->profile->verification_status)->toBe('unverified');
+});
+
+// ---------------------------------------------------------------------------
 // Otorgar paquete (features/premium/specs/ → "Catálogo de paquetes") —
 // tercera excepción al "solo lectura" de este recurso, mismo patrón que
 // togglePremium/unban. Delega en PackageService::grantToUser(), ya probado a

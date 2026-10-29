@@ -9,6 +9,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 
@@ -293,6 +294,78 @@ describe('VerificationService approve/reject', function () {
 
         expect($result->status)->toBe('approved');
         expect($this->profile->fresh()->verification_status)->toBe('verified');
+    });
+
+});
+
+// ---------------------------------------------------------------------------
+// VerificationService::resetVerification() — uso administrativo (Filament),
+// reinicia la verificación de un usuario a 'unverified' sin borrar el
+// historial de VerificationRequest.
+// ---------------------------------------------------------------------------
+
+describe('VerificationService resetVerification', function () {
+
+    it('resetea a unverified un perfil que estaba verified', function () {
+        $this->profile->update(['verification_status' => 'verified']);
+
+        app(VerificationService::class)->resetVerification($this->user);
+
+        expect($this->profile->fresh()->verification_status)->toBe('unverified');
+    });
+
+    it('resetea a unverified un perfil que estaba rejected', function () {
+        $this->profile->update(['verification_status' => 'rejected']);
+
+        app(VerificationService::class)->resetVerification($this->user);
+
+        expect($this->profile->fresh()->verification_status)->toBe('unverified');
+    });
+
+    it('borra del disco los archivos de solicitudes previas al resetear', function () {
+        $documentPath = 'verification/' . $this->profile->id . '/doc.jpg';
+        $selfiePath   = 'verification/' . $this->profile->id . '/selfie.jpg';
+
+        Storage::disk('local')->put($documentPath, 'contenido de prueba');
+        Storage::disk('local')->put($selfiePath, 'contenido de prueba');
+
+        VerificationRequest::create([
+            'profile_id'    => $this->profile->id,
+            'document_path' => $documentPath,
+            'selfie_path'   => $selfiePath,
+            'status'        => 'approved',
+        ]);
+
+        $this->profile->update(['verification_status' => 'verified']);
+
+        app(VerificationService::class)->resetVerification($this->user);
+
+        Storage::disk('local')->assertMissing($documentPath);
+        Storage::disk('local')->assertMissing($selfiePath);
+    });
+
+    it('no borra la fila de VerificationRequest original, solo el status del perfil', function () {
+        $request = VerificationRequest::create([
+            'profile_id'       => $this->profile->id,
+            'document_path'    => 'verification/' . $this->profile->id . '/doc.jpg',
+            'status'           => 'rejected',
+            'rejection_reason' => 'Foto borrosa',
+        ]);
+
+        $this->profile->update(['verification_status' => 'rejected']);
+
+        app(VerificationService::class)->resetVerification($this->user);
+
+        expect(VerificationRequest::find($request->id))->not->toBeNull();
+        expect($request->fresh()->status)->toBe('rejected');
+        expect($request->fresh()->rejection_reason)->toBe('Foto borrosa');
+    });
+
+    it('usuario sin perfil lanza 404', function () {
+        $userWithoutProfile = User::factory()->withCompletedOnboarding()->create();
+
+        expect(fn () => app(VerificationService::class)->resetVerification($userWithoutProfile))
+            ->toThrow(NotFoundHttpException::class);
     });
 
 });

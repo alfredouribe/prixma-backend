@@ -8,6 +8,7 @@ use App\Models\Package;
 use App\Models\User;
 use App\Services\PackageService;
 use App\Services\SafetyService;
+use App\Services\VerificationService;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Form;
@@ -200,6 +201,32 @@ class UserResource extends Resource
 
                         Notification::make()
                             ->title('Usuario baneado')
+                            ->success()
+                            ->send();
+                    }),
+
+                // Quinta excepción al "solo lectura" de este recurso (ver
+                // comentario en form() arriba) — reinicia la verificación de
+                // identidad de un usuario a "No verificado" (ej. para que
+                // pueda volver a subir su documento tras un bug, sin tener
+                // que crear una cuenta nueva). Delega por completo en
+                // VerificationService::resetVerification() (borra archivos
+                // huérfanos en disco y resetea el campo denormalizado
+                // profiles.verification_status) — ninguna lógica de negocio
+                // vive aquí. Oculta si el usuario ya está "Sin verificar",
+                // mismo criterio que `unban` solo visible si está baneado.
+                Tables\Actions\Action::make('resetVerification')
+                    ->label('Reiniciar verificación')
+                    ->icon('heroicon-o-arrow-path')
+                    ->color('warning')
+                    ->requiresConfirmation()
+                    ->modalDescription('¿Confirmas que quieres reiniciar la verificación de este usuario? Su estado volverá a "No verificado" y podrá subir su documento de identificación de nuevo. El historial de solicitudes anteriores no se borra.')
+                    ->visible(fn (User $record): bool => ($record->profile?->verification_status ?? 'unverified') !== 'unverified')
+                    ->action(function (User $record): void {
+                        app(VerificationService::class)->resetVerification($record);
+
+                        Notification::make()
+                            ->title('Verificación reiniciada')
                             ->success()
                             ->send();
                     }),

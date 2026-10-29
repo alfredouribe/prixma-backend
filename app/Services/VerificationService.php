@@ -159,6 +159,30 @@ class VerificationService
     }
 
     /**
+     * Reinicia la verificación de un usuario a 'unverified' — uso
+     * administrativo (panel Filament), para permitir que alguien vuelva a
+     * intentar el proceso desde cero (ej. probar subir el documento de nuevo
+     * tras un fallo, o una decisión de soporte). Borra cualquier archivo que
+     * pudiera seguir en disco de solicitudes previas (reusa
+     * deleteAllFilesForProfile(), que es idempotente) antes de resetear el
+     * status, para no dejar binarios huérfanos de una solicitud 'pending' que
+     * nunca se aprobó/rechazó formalmente.
+     *
+     * Las filas de VerificationRequest NO se borran — quedan como historial
+     * de auditoría intacto (mismo criterio que approve()/reject(), que
+     * tampoco borran filas, solo los archivos en disco). Solo se resetea el
+     * campo denormalizado profiles.verification_status.
+     */
+    public function resetVerification(User $user): void
+    {
+        $profile = $user->profile ?? abort(404);
+
+        $this->deleteAllFilesForProfile($profile);
+
+        $profile->update(['verification_status' => 'unverified']);
+    }
+
+    /**
      * Retorna la VerificationRequest vigente (más reciente) del perfil,
      * o null si el usuario nunca ha intentado verificarse.
      */
