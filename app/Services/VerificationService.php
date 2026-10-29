@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Models\VerificationRequest;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\Process\Process;
@@ -76,6 +77,25 @@ class VerificationService
             $process->run();
 
             if (!$process->isSuccessful() || !file_exists($outputPath) || filesize($outputPath) === 0) {
+                // Antes esto se tragaba el error real de ffmpeg — el usuario
+                // veía siempre el mismo mensaje genérico sin importar la
+                // causa real (archivo corrupto, disco lleno, formato no
+                // soportado, codec faltante, etc.), y no quedaba nada en el
+                // log para diagnosticarlo. Logueamos todo lo que Symfony
+                // Process expone antes de lanzar la excepción de cara al
+                // usuario, que se queda igual.
+                Log::error('VerificationService: ffmpeg falló al comprimir el documento/selfie.', [
+                    'exit_code'       => $process->getExitCode(),
+                    'exit_code_text'  => $process->getExitCodeText(),
+                    'error_output'    => $process->getErrorOutput(),
+                    'output'          => $process->getOutput(),
+                    'output_exists'   => file_exists($outputPath),
+                    'output_size'     => file_exists($outputPath) ? filesize($outputPath) : null,
+                    'input_path'      => $file->getRealPath(),
+                    'input_mime'      => $file->getMimeType(),
+                    'input_size'      => $file->getSize(),
+                ]);
+
                 throw new BusinessException('No pudimos procesar tu documento. Verifica que la imagen no esté dañada e intenta de nuevo.');
             }
 
