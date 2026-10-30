@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Exceptions\BusinessException;
+use App\Mail\NewVerificationRequestMail;
 use App\Models\Admin;
 use App\Models\Profile;
 use App\Models\User;
@@ -10,6 +11,7 @@ use App\Models\VerificationRequest;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\Process\Process;
@@ -46,7 +48,7 @@ class VerificationService
         $documentPath = $this->compressAndStore($document, $basePath . '/document.jpg');
         $selfiePath = $selfie ? $this->compressAndStore($selfie, $basePath . '/selfie.jpg') : null;
 
-        return DB::transaction(function () use ($profile, $documentPath, $selfiePath) {
+        $verificationRequest = DB::transaction(function () use ($profile, $documentPath, $selfiePath) {
             return VerificationRequest::create([
                 'profile_id'    => $profile->id,
                 'document_path' => $documentPath,
@@ -54,6 +56,13 @@ class VerificationService
                 'status'        => 'pending',
             ]);
         });
+
+        // Aviso al dueño del producto — best-effort, fuera de la transacción
+        // (mismo criterio que SafetyService::banUser(): un fallo de envío de
+        // correo nunca debe tumbar la creación de la solicitud).
+        Mail::to('alfred@prixma.site')->queue(new NewVerificationRequestMail($verificationRequest));
+
+        return $verificationRequest;
     }
 
     /**

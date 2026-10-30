@@ -275,10 +275,24 @@ class ProfileService
 
     private function calculateStatistics(Profile $profile): array
     {
+        // Bug real corregido 2026-10-29: este conteo contaba TODO like en
+        // `swipes` sin importar si quien lo dio sigue siendo una cuenta
+        // activa — ni la auto-eliminación de cuenta (AuthService::deleteAccount())
+        // ni un ban (SafetyService::banUser()) borran la fila física de
+        // `swipes` (User usa SoftDeletes / solo cambia `status`, así que el
+        // cascadeOnDelete() de la FK nunca se dispara), y por eso un like de
+        // alguien eliminado/baneado seguía inflando "Likes" para siempre —
+        // en discrepancia con MatchingService::getLikers() (pantalla "Quién
+        // te dio like"), que sí excluye ambos casos. Como es DB::table()
+        // (query builder plano, no Eloquent), el global scope de soft-delete
+        // no aplica solo: se filtra `deleted_at`/`status` a mano vía join.
         $likesReceived = Schema::hasTable('swipes')
             ? DB::table('swipes')
-                ->where('swiped_id', $profile->user_id)
-                ->whereIn('direction', ['like', 'super_like'])
+                ->join('users', 'users.id', '=', 'swipes.swiper_id')
+                ->where('swipes.swiped_id', $profile->user_id)
+                ->whereIn('swipes.direction', ['like', 'super_like'])
+                ->where('users.status', 'active')
+                ->whereNull('users.deleted_at')
                 ->count()
             : 0;
 

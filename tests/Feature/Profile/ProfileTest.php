@@ -133,6 +133,63 @@ describe('me', function () {
         expect($response->json('data.statistics.events_count'))->toBe(2);
     });
 
+    it('no cuenta en likes_received el like de un usuario con la cuenta eliminada (soft-deleted)', function () {
+        // Regresión 2026-10-29: likes_received contaba TODO like en `swipes`
+        // sin importar si quien lo dio sigue existiendo. AuthService::deleteAccount()
+        // hace soft-delete de User (columna deleted_at) sin tocar la fila de
+        // `swipes` — el like debe dejar de contar.
+        $liker = User::factory()->withCompletedOnboarding()->create();
+
+        \App\Models\Swipe::create([
+            'swiper_id' => $liker->id,
+            'swiped_id' => $this->user->id,
+            'direction' => 'like',
+        ]);
+
+        $liker->delete();
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/profiles/me')
+            ->assertStatus(200);
+
+        expect($response->json('data.statistics.likes_received'))->toBe(0);
+    });
+
+    it('no cuenta en likes_received el like de un usuario baneado', function () {
+        // Regresión 2026-10-29: SafetyService::banUser() solo cambia
+        // `status` a 'banned', no borra la fila de `swipes` — el like no
+        // debe seguir inflando el conteo para siempre.
+        $liker = User::factory()->withCompletedOnboarding()->create(['status' => 'banned']);
+
+        \App\Models\Swipe::create([
+            'swiper_id' => $liker->id,
+            'swiped_id' => $this->user->id,
+            'direction' => 'super_like',
+        ]);
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/profiles/me')
+            ->assertStatus(200);
+
+        expect($response->json('data.statistics.likes_received'))->toBe(0);
+    });
+
+    it('cuenta en likes_received el like de un usuario activo normal', function () {
+        $liker = User::factory()->withCompletedOnboarding()->create();
+
+        \App\Models\Swipe::create([
+            'swiper_id' => $liker->id,
+            'swiped_id' => $this->user->id,
+            'direction' => 'like',
+        ]);
+
+        $response = $this->withToken($this->token)
+            ->getJson('/api/profiles/me')
+            ->assertStatus(200);
+
+        expect($response->json('data.statistics.likes_received'))->toBe(1);
+    });
+
     it('incluye verification_status con el valor por defecto unverified', function () {
         $this->withToken($this->token)
             ->getJson('/api/profiles/me')

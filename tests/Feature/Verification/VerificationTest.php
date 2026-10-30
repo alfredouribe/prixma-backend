@@ -1,5 +1,7 @@
 <?php
 
+use App\Exceptions\BusinessException;
+use App\Mail\NewVerificationRequestMail;
 use App\Models\Admin;
 use App\Models\Profile;
 use App\Models\User;
@@ -7,6 +9,7 @@ use App\Models\VerificationRequest;
 use App\Services\VerificationService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -174,6 +177,58 @@ describe('submit', function () {
         expect($first->fresh()->status)->toBe('rejected');
         expect($first->fresh()->rejection_reason)->toBe('La foto no es legible.');
         expect($this->profile->fresh()->verification_status)->toBe('pending');
+    });
+
+});
+
+// ---------------------------------------------------------------------------
+// Aviso por correo al dueño del producto (alfred@prixma.site) al crear una
+// solicitud nueva — ver VerificationService::submit().
+// ---------------------------------------------------------------------------
+
+describe('aviso por correo de nueva solicitud', function () {
+
+    it('al enviar una solicitud de verificación exitosa, se encola NewVerificationRequestMail a alfred@prixma.site', function () {
+        Mail::fake();
+
+        $this->withToken($this->token)
+            ->post('/api/verification', [
+                'document' => UploadedFile::fake()->image('document.jpg'),
+            ], ['Accept' => 'application/json'])
+            ->assertStatus(201);
+
+        Mail::assertQueued(NewVerificationRequestMail::class, function ($mail) {
+            return $mail->hasTo('alfred@prixma.site');
+        });
+    });
+
+    it('el mail contiene la VerificationRequest correcta', function () {
+        Mail::fake();
+
+        $this->withToken($this->token)
+            ->post('/api/verification', [
+                'document' => UploadedFile::fake()->image('document.jpg'),
+            ], ['Accept' => 'application/json'])
+            ->assertStatus(201);
+
+        $verificationRequest = VerificationRequest::where('profile_id', $this->profile->id)->sole();
+
+        Mail::assertQueued(NewVerificationRequestMail::class, function ($mail) use ($verificationRequest) {
+            return (string) $mail->verificationRequest->id === (string) $verificationRequest->id;
+        });
+    });
+
+    it('si submit() lanza BusinessException antes de crear la solicitud, no se encola ningún correo', function () {
+        Mail::fake();
+
+        $this->profile->update(['verification_status' => 'verified']);
+
+        expect(fn () => app(VerificationService::class)->submit(
+            $this->user,
+            UploadedFile::fake()->image('document.jpg'),
+        ))->toThrow(BusinessException::class);
+
+        Mail::assertNothingQueued();
     });
 
 });
